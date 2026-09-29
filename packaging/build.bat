@@ -3,8 +3,10 @@ REM Build ObsOverlay.exe. Thin wrapper around build.ps1 so the build can be
 REM started by double-clicking, without changing the PowerShell execution
 REM policy machine-wide.
 REM
-REM Usage:  build.bat          normal build
-REM         build.bat -Clean   remove previous output first
+REM Usage:  build.bat                        normal build
+REM         build.bat -Clean                 remove previous output first
+REM         build.bat -Clean -Installer      also build the setup .exe
+REM                                          (needs Inno Setup 6)
 
 setlocal
 set "SCRIPT_DIR=%~dp0"

@@ -48,6 +48,10 @@ coverage.xml
 *.spec.bak
 packaging/build/
 packaging/dist/
+packaging/.buildenv/
+
+# --- Inno Setup output ---
+packaging/installer/
 
 # --- Editors / OS ---
 .vscode/

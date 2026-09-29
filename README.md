@@ -125,13 +125,29 @@ Hanya dibutuhkan kalau Anda memakai sumber yang bersangkutan:
 
 ## Instalasi cepat
 
-### Opsi A — file .exe siap pakai
+### Opsi A — installer (paling mudah)
 
-Unduh `ObsOverlay-<versi>-windows-x64.zip` dari halaman
-[Releases](https://github.com/yusril1701/obs-overlay/releases), ekstrak, lalu jalankan
-`ObsOverlay.exe`. Tidak perlu memasang Python.
+Unduh `ObsOverlay-<versi>-setup.exe` dari halaman
+[Releases](https://github.com/yusril1701/obs-overlay/releases) dan jalankan. Tidak perlu
+memasang Python, dan tidak perlu hak administrator — bawaannya memasang untuk pengguna
+Anda saja, meski dialognya tetap menawarkan pemasangan untuk semua pengguna.
 
-### Opsi B — dari kode sumber
+Yang dilakukan installer: pintasan Start Menu (plus desktop dan autostart kalau dicentang),
+entri di **Apps & features**, dan uninstaller. Profil Anda disimpan di
+`%APPDATA%\obs-overlay` dan **tidak** ikut terhapus saat uninstall kecuali Anda
+menjawab ya waktu ditanya.
+
+> Windows SmartScreen akan memperingatkan karena berkasnya belum ditandatangani secara
+> digital. **More info → Run anyway.** Ini berlaku untuk semua aplikasi open-source tanpa
+> sertifikat Authenticode, yang harganya ratusan dolar per tahun.
+
+### Opsi B — portable (flash disk)
+
+Unduh `ObsOverlay-<versi>-windows-x64.zip`, ekstrak, jalankan `ObsOverlay.exe`. Tidak
+mengubah apa pun di sistem. Untuk menyimpan profil di dalam foldernya sendiri — cocok
+untuk flash disk — buat berkas kosong bernama `portable.txt` di sebelah `ObsOverlay.exe`.
+
+### Opsi C — dari kode sumber
 
 ```powershell
 git clone https://github.com/yusril1701/obs-overlay.git

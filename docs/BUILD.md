@@ -1,10 +1,26 @@
 # Membangun file .exe
 
+> **Harus dijalankan di Windows.** PyInstaller tidak bisa *cross-compile*: ia membungkus
+> interpreter dan DLL milik mesin yang menjalankannya. Membangun di Linux menghasilkan
+> binary Linux, bukan `.exe`. Selain itu `SpoutGL` dan `pywin32` hanya punya wheel
+> Windows. Kalau Anda tidak punya mesin Windows, pakai
+> [CI](#ci) — GitHub menyediakan runner Windows gratis.
+
 ```powershell
 powershell -ExecutionPolicy Bypass -File packaging\build.ps1
 ```
 
 atau klik dua kali `packaging\build.bat`. Hasil: `packaging\dist\ObsOverlay\ObsOverlay.exe`.
+
+Untuk sekalian membuat **installer**:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File packaging\build.ps1 -Clean -Installer
+```
+
+Hasil tambahan: `packaging\installer\ObsOverlay-<versi>-setup.exe`.
+Butuh [Inno Setup 6](https://jrsoftware.org/isdl.php)
+(`winget install JRSoftware.InnoSetup`).
 
 ---
 
@@ -16,13 +32,31 @@ atau klik dua kali `packaging\build.bat`. Hasil: `packaging\dist\ObsOverlay\ObsO
 4. Membuat ulang `packaging\obs-overlay.ico` dari kode ikon
 5. Menjalankan PyInstaller dengan `packaging\ObsOverlay.spec`
 6. Smoke test: menjalankan .exe hasil build sekali
+7. Dengan `-Installer`: mengompilasi `packaging\installer.iss` dengan Inno Setup
 
 Opsi:
 
 ```powershell
-packaging\build.ps1 -Clean      # hapus output dan venv build dulu
-packaging\build.ps1 -SkipVenv   # pakai interpreter yang sedang aktif
+packaging\build.ps1 -Clean       # hapus output dan venv build dulu
+packaging\build.ps1 -SkipVenv    # pakai interpreter yang sedang aktif
+packaging\build.ps1 -Installer   # sekalian buat setup .exe
 ```
+
+---
+
+## Installer
+
+`packaging\installer.iss` membungkus hasil one-dir menjadi satu `setup.exe` biasa:
+wizard, entri di **Apps & features**, pintasan Start Menu, dan uninstaller.
+
+| Keputusan | Alasan |
+|---|---|
+| **Per-user secara bawaan** (`PrivilegesRequired=lowest`) | Overlay ini tidak butuh apa pun yang memerlukan admin, jadi memasangnya juga tidak perlu admin. Dialognya tetap menawarkan pemasangan untuk semua pengguna. |
+| **`portable.txt` dikecualikan** | Berkas itu memaksa mode portable. Salinan yang terpasang tidak boleh punya — ia akan mencoba menulis profil ke Program Files. |
+| **Autostart selalu `HKCU`** | Overlay milik pengguna yang sedang masuk, bukan milik mesin. Opsional dan tidak dicentang secara bawaan. |
+| **Data pengguna tidak ikut terhapus** | Profil dan log ada di `%APPDATA%\obs-overlay`, yang tidak pernah dibuat installer. Instalasi ulang menemukannya kembali; uninstaller menanyakan secara eksplisit sebelum menghapus. |
+| **`AppId` tetap** | GUID yang sama membuat versi baru *menggantikan* yang lama, bukan terpasang berdampingan. Jangan pernah mengubahnya. |
+| **Bahasa Inggris saja** | Inno Setup 6 tidak menyertakan terjemahan Indonesia (yang ada hanya unduhan tidak resmi), dan antarmuka aplikasinya sendiri berbahasa Inggris. Dokumentasi berbahasa Indonesia ikut terpasang di `docs\`. |
 
 ---
 
@@ -60,8 +94,8 @@ One-file mengekstrak ~150 MB Qt + Python ke `%TEMP%` **setiap kali dijalankan**.
 start dingin beberapa detik, antivirus memindai ulang setiap DLL, dan ini penyebab utama
 false positive Defender/SmartScreen.
 
-Kalau ingin satu berkas unduhan, bungkus folder one-dir dengan installer
-(Inno Setup atau WiX) — bukan dengan `--onefile`.
+Kalau ingin satu berkas unduhan, bungkus folder one-dir dengan installer — itulah yang
+dilakukan `packaging\installer.iss` — bukan dengan `--onefile`.
 
 ### `upx=False`
 
@@ -149,12 +183,28 @@ tema.
 |---|---|---|
 | **lint** | Ubuntu | ruff check, ruff format --check, mypy |
 | **test** | Ubuntu (3.9–3.13) + Windows (3.12) | pytest dengan coverage; `mypy --platform win32` di Windows |
-| **build** | Windows | PyInstaller + smoke test + upload artifact |
-| **release** | Windows | Dijalankan pada tag `v*`; melampirkan zip ke GitHub Release |
+| **build** | Windows | PyInstaller + smoke test + Inno Setup; mengunggah dua artifact |
+| **release** | Windows | Dijalankan pada tag `v*`; melampirkan installer dan zip ke GitHub Release |
+
+Job **build** menghasilkan dua artifact:
+
+| Artifact | Isi |
+|---|---|
+| `ObsOverlay-installer` | `ObsOverlay-<versi>-setup.exe` — pasang seperti aplikasi biasa |
+| `ObsOverlay-windows-x64` | folder one-dir — untuk portable/flash disk |
+
+Keduanya bisa diunduh dari halaman run di tab **Actions**, tanpa perlu membuat rilis.
+
+Jalankan build tanpa mendorong commit apa pun: tab **Actions** → **CI** →
+**Run workflow**.
 
 Merilis versi baru:
 
 ```powershell
-git tag v1.0.0
-git push origin v1.0.0
+git tag v1.1.0
+git push origin v1.1.0
 ```
+
+Versi installer dibaca dari `obs_overlay.constants.APP_VERSION`, bukan dari nama tag,
+jadi keduanya tidak bisa saling bertentangan. Naikkan `APP_VERSION`, `pyproject.toml`,
+dan `packaging/version_info.txt` bersama-sama sebelum memberi tag.

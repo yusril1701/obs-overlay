@@ -129,11 +129,51 @@ jobs:
           & $exe --version
           if ($LASTEXITCODE -ne 0) { throw "Executable failed to start ($LASTEXITCODE)" }
 
-      - name: Upload the build
+      - name: Read the application version
+        id: version
+        shell: pwsh
+        run: |
+          # Straight from the package, so the installer can never disagree
+          # with what the application reports about itself.
+          $v = python -c "from obs_overlay.constants import APP_VERSION; print(APP_VERSION)"
+          if ($LASTEXITCODE -ne 0 -or -not $v) { throw "Could not read APP_VERSION" }
+          "version=$v" >> $env:GITHUB_OUTPUT
+          Write-Host "Version: $v"
+
+      - name: Build the installer
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            Write-Host "Inno Setup not present on the image; installing it."
+            choco install innosetup --no-progress -y
+            if ($LASTEXITCODE -ne 0) { throw "Could not install Inno Setup" }
+          }
+          if (-not (Test-Path $iscc)) { throw "ISCC.exe not found at $iscc" }
+          & $iscc "/DAppVersion=${{ steps.version.outputs.version }}" packaging/installer.iss
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed ($LASTEXITCODE)" }
+
+      - name: Check the installer was produced
+        shell: pwsh
+        run: |
+          $setup = "packaging/installer/ObsOverlay-${{ steps.version.outputs.version }}-setup.exe"
+          if (-not (Test-Path $setup)) { throw "Installer not produced" }
+          $mb = [math]::Round((Get-Item $setup).Length / 1MB, 1)
+          Write-Host "Installer: $setup ($mb MB)"
+
+      - name: Upload the portable build
         uses: actions/upload-artifact@v4
         with:
           name: ObsOverlay-windows-x64
           path: packaging/dist/ObsOverlay/
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Upload the installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: ObsOverlay-installer
+          path: packaging/installer/*.exe
           retention-days: 30
           if-no-files-found: error
 
@@ -152,6 +192,11 @@ jobs:
           name: ObsOverlay-windows-x64
           path: dist/ObsOverlay
 
+      - uses: actions/download-artifact@v4
+        with:
+          name: ObsOverlay-installer
+          path: installer
+
       - name: Create the archive
         shell: pwsh
         run: |
@@ -161,5 +206,9 @@ jobs:
       - name: Publish
         uses: softprops/action-gh-release@v2
         with:
-          files: ObsOverlay-*-windows-x64.zip
+          # Two ways to get it: the installer for a normal machine, the zip for
+          # a USB stick or a locked-down one.
+          files: |
+            installer/*.exe
+            ObsOverlay-*-windows-x64.zip
           generate_release_notes: true
