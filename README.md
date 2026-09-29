@@ -1,11 +1,20 @@
 # OBS Overlay
 
-**Overlay transparan dan tembus-klik untuk Windows, menerima video dari OBS Studio lewat Spout2.**
+**Overlay transparan dan tembus-klik untuk Windows — dari OBS Studio (Spout2), NDI,
+tangkapan layar, atau berkas gambar.**
 
-Aplikasi ini menampilkan hasil render OBS di atas seluruh layar (*always on top*) dengan
-transparansi penuh (*alpha channel*), lalu **memotong jendelanya menjadi kotak-kotak
-(parsel)**. Area di antara kotak bukan cuma transparan secara visual — area itu benar-benar
-tidak ada, sehingga klik mouse tembus ke aplikasi di belakangnya.
+Aplikasi ini menampilkan video di atas seluruh layar (*always on top*) dengan transparansi
+penuh (*alpha channel*), lalu **memotong jendelanya menjadi kotak-kotak (parsel)**. Area di
+antara kotak bukan cuma transparan secara visual — area itu benar-benar tidak ada, sehingga
+klik mouse tembus ke aplikasi di belakangnya.
+
+| Sumber | Butuh apa | Alpha |
+|---|---|---|
+| **OBS via Spout2** | plugin Spout2 + `SpoutGL` | ya (premultiplied) |
+| **NDI** | `ndi-python` + NDI Runtime | ya (straight) |
+| **Tangkapan layar** | — | tidak (opaque) |
+| **Berkas gambar** | — | ya (PNG/GIF/WebP) |
+| **Pola uji bawaan** | — | ya |
 
 Dibangun dari *Project Blueprint: OBS Spout to Python Transparent Overlay*, lengkap sampai
 Fase 4 (editor parsel interaktif).
@@ -42,6 +51,7 @@ Fase 4 (editor parsel interaktif).
 - [Fitur](#fitur)
 - [Persyaratan](#persyaratan)
 - [Instalasi cepat](#instalasi-cepat)
+- [Memilih sumber video](#memilih-sumber-video)
 - [Menyiapkan OBS](#menyiapkan-obs)
 - [Cara pakai](#cara-pakai)
 - [Hotkey](#hotkey)
@@ -67,6 +77,10 @@ Fase 4 (editor parsel interaktif).
 
 **Di atas blueprint**
 
+- **Empat sumber video selain OBS** — NDI lewat jaringan, tangkapan layar (satu monitor
+  atau sebagian saja), berkas gambar PNG/GIF/WebP dengan alpha, dan pola uji bawaan.
+  Setiap sumber punya setelannya sendiri dan semuanya disimpan, jadi berpindah sumber
+  tidak menghapus konfigurasi yang lain.
 - **Editor parsel interaktif** — geser, ubah ukuran, dan bentuk kotak langsung di layar,
   dengan *snapping*, garis bantu, *multi-select*, *align/distribute*, dan undo/redo 64 langkah.
 - **Empat bentuk parsel**: persegi, persegi sudut tumpul, elips, dan poligon.
@@ -92,11 +106,16 @@ Fase 4 (editor parsel interaktif).
 
 | Komponen | Versi | Catatan |
 |---|---|---|
-| Windows | 10 atau 11 (64-bit) | API Win32 dan Spout wajib Windows |
+| Windows | 10 atau 11 (64-bit) | API Win32 wajib Windows |
 | Python | 3.9 – 3.13 | `SpoutGL` tidak punya wheel di atas 3.13 |
-| OBS Studio | 30 / 31 / 32 | |
-| Plugin Spout2 untuk OBS | 1.12.0+ | [Off-World-Live/obs-spout2-plugin](https://github.com/Off-World-Live/obs-spout2-plugin) |
-| GPU | satu GPU saja | Spout tidak bisa berbagi antar GPU — lihat [Kalau ada masalah](#kalau-ada-masalah) |
+
+Hanya dibutuhkan kalau Anda memakai sumber yang bersangkutan:
+
+| Sumber | Yang perlu dipasang |
+|---|---|
+| **OBS / Spout2** | OBS Studio 30–32, [plugin Spout2](https://github.com/Off-World-Live/obs-spout2-plugin) 1.12+, `pip install SpoutGL`. Satu GPU saja — lihat [Kalau ada masalah](#kalau-ada-masalah). |
+| **NDI** | `pip install ndi-python` **dan** NDI Runtime dari [ndi.video](https://ndi.video/) (dipasang terpisah karena lisensinya). Butuh Python 3.10+. |
+| **Layar / gambar / pola uji** | Tidak ada — cukup Qt. |
 
 > **Catatan:** aplikasi ini juga bisa dijalankan di Linux/macOS untuk pengembangan dan
 > pengujian (dengan sumber uji bawaan), tetapi *click-through*, hotkey global, dan Spout
@@ -125,6 +144,12 @@ pip install -e .
 obs-overlay
 ```
 
+Mau memakai NDI? Tambahkan ekstranya (Runtime-nya tetap dipasang terpisah):
+
+```powershell
+pip install -e ".[ndi]"
+```
+
 Mau mencoba dulu tanpa OBS? Jalankan dengan pola uji bawaan:
 
 ```powershell
@@ -133,6 +158,52 @@ obs-overlay --demo
 
 Panel kontrol akan terbuka dan overlay langsung tampil dengan pola animasi yang punya
 area transparan sungguhan — bagus untuk memastikan alpha bekerja sebelum menyentuh OBS.
+
+---
+
+## Memilih sumber video
+
+Tab **Source** di panel kontrol. Setiap sumber menampilkan setelannya sendiri; setelan
+sumber lain tetap tersimpan.
+
+### OBS via Spout2
+Pilihan utama, satu-satunya yang membawa alpha langsung dari komposisi OBS.
+Lihat [Menyiapkan OBS](#menyiapkan-obs).
+
+### NDI
+Untuk menerima dari mesin lain di jaringan, atau dari aplikasi yang mengirim NDI.
+
+```powershell
+pip install ndi-python
+```
+
+Lalu pasang **NDI Runtime** dari [ndi.video](https://ndi.video/) — ini terpisah karena
+lisensinya. Tekan **Scan** untuk mencari sumber di jaringan.
+
+> NDI mengirim alpha **straight**, kebalikan dari OBS/Spout. Setelan "Source uses
+> premultiplied alpha" karena itu **mati** secara bawaan untuk NDI.
+
+### Tangkapan layar
+Menangkap satu monitor, atau sebagian saja (centang **Capture only part of the monitor**
+lalu isi X/Y/W/H relatif terhadap monitor tersebut).
+
+> **Jangan menangkap monitor yang ditempati overlay** — overlay akan memotret dirinya
+> sendiri dan menghasilkan efek terowongan tak terhingga. Aplikasi mendeteksi ini dan
+> otomatis menyembunyikan overlay dari tangkapan layar (butuh Windows 10 versi 2004+).
+> Cara paling aman tetap: tangkap monitor yang berbeda.
+
+Tangkapan layar tidak punya alpha — hasilnya selalu opaque di dalam parsel.
+
+### Berkas gambar
+Cara tercepat menaruh logo atau bingkai di layar: pilih PNG dengan transparansi. GIF dan
+WebP animasi juga bisa diputar.
+
+Gambar diam hanya dikirim **sekali** lalu pipeline menganggur sepenuhnya — overlay
+menyimpan frame terakhir, jadi tidak ada CPU yang terbuang.
+
+### Pola uji bawaan
+Pola animasi dengan area transparan sungguhan. Untuk menata parsel sebelum OBS jalan, dan
+untuk memastikan jalur alpha bekerja.
 
 ---
 
@@ -241,17 +312,30 @@ Semuanya global (berfungsi walau aplikasi lain sedang fokus) dan bisa diubah di 
 ```
 obs-overlay [OPSI]
 
-  -p, --profile NAMA     Muat profil tertentu
-      --demo             Paksa pakai pola uji bawaan
-      --sender NAMA      Timpa nama Spout sender untuk sesi ini
-      --monitor INDEKS   Taruh overlay di monitor ini (0 = pertama)
-      --edit             Langsung masuk mode editor
-      --no-panel         Jangan buka panel kontrol saat mulai
-      --log-level LEVEL  DEBUG / INFO / WARNING / ERROR / CRITICAL
-      --data-dir PATH    Pakai folder lain untuk profil dan log
-      --list-senders     Tampilkan Spout sender yang aktif, lalu keluar
-      --list-profiles    Tampilkan profil tersimpan, lalu keluar
-      --version          Tampilkan versi
+  -p, --profile NAMA         Muat profil tertentu
+      --source KIND          Paksa sumber: spout / ndi / screen / image / demo
+      --demo                 Sama dengan --source demo
+      --sender NAMA          Timpa nama sender (Spout, atau NDI dengan --source ndi)
+      --image PATH           Tampilkan berkas gambar ini (menyiratkan --source image)
+      --capture-monitor N    Monitor yang ditangkap dengan --source screen (0 = pertama)
+      --monitor INDEKS       Taruh overlay di monitor ini (0 = pertama)
+      --edit                 Langsung masuk mode editor
+      --no-panel             Jangan buka panel kontrol saat mulai
+      --log-level LEVEL      DEBUG / INFO / WARNING / ERROR / CRITICAL
+      --data-dir PATH        Pakai folder lain untuk profil dan log
+      --list-senders         Tampilkan yang bisa disambungkan, lalu keluar
+                             (ikut --source: spout / ndi / screen)
+      --list-profiles        Tampilkan profil tersimpan, lalu keluar
+      --version              Tampilkan versi
+```
+
+Contoh:
+
+```powershell
+obs-overlay --list-senders --source ndi      # cari sumber NDI di jaringan
+obs-overlay --list-senders --source screen   # daftar monitor yang tersambung
+obs-overlay --source screen --capture-monitor 1
+obs-overlay --image C:\logo.png
 ```
 
 Penimpaan lewat baris perintah **tidak disimpan** — menjalankan `--demo` sekali tidak
@@ -280,6 +364,8 @@ Ringkasan masalah yang paling sering muncul. Daftar lengkap: **[docs/TROUBLESHOO
 |---|---|
 | Overlay hitam/buram, tidak transparan | `Color Format` di OBS belum **BGRA (8-bit)** |
 | Tepi gambar bergaris gelap | Setelan **premultiplied alpha** tidak cocok (tab Source) |
+| Efek terowongan tak terhingga | Tangkapan layar diarahkan ke monitor yang ditempati overlay |
+| NDI tidak menemukan sumber | NDI Runtime belum terpasang, atau mDNS diblokir firewall |
 | Sender tidak muncul di daftar | Filter dipasang tapi tombol **Change Spout Filter Name** belum ditekan |
 | Sender hilang saat ganti scene | **Continuous filter broadcast** belum dicentang |
 | Selalu "Waiting for a Spout sender" | OBS dan aplikasi ini jalan di GPU berbeda (laptop hybrid) |
@@ -296,7 +382,7 @@ Log lengkap ada di `%APPDATA%\obs-overlay\logs\obs-overlay.log`
 ```powershell
 pip install -e ".[dev]"
 
-pytest                    # 300+ tes, jalan tanpa GPU/OBS
+pytest                    # 378 tes, jalan tanpa GPU/OBS
 ruff check src tests
 ruff format src tests
 mypy

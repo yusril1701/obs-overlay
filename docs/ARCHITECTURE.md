@@ -18,7 +18,7 @@ obs_overlay/
 │
 ├── config/
 │   ├── models.py       Dataclass profil. Setiap from_dict() total dan tahan input rusak.
-│   ├── migrations.py   Upgrade skema v1 → v2.
+│   ├── migrations.py   Upgrade skema v1 → v2 → v3.
 │   └── store.py        Tulis atomik, karantina file rusak, kelola profil.
 │
 ├── core/
@@ -31,8 +31,12 @@ obs_overlay/
 ├── sources/
 │   ├── base.py         Antarmuka VideoSource.
 │   ├── spout_source.py Penerima Spout2 (Windows).
+│   ├── ndi_source.py   Penerima NDI lewat ndi-python (lintas platform).
+│   ├── screen_source.py Tangkapan monitor/region; grabber hidup di thread GUI.
+│   ├── image_source.py Berkas gambar diam atau animasi (QMovie).
 │   ├── demo_source.py  Pola uji animasi (semua platform).
-│   └── registry.py     Pabrik; impor SpoutGL dibuat malas.
+│   ├── qt_frames.py    QImage → Frame dari pool, menangani stride.
+│   └── registry.py     Pabrik; setiap impor opsional dibuat malas.
 │
 ├── native/             Integrasi Win32, dengan stub no-op di platform lain.
 │   ├── base.py         Antarmuka + implementasi Null.
@@ -59,7 +63,10 @@ Windows, dan tanpa OBS.
 ## Alur data satu frame
 
 ```
-OBS  ──(Spout2, shared GPU memory)──►  SpoutReceiver.receiveImage()
+OBS    ──(Spout2, shared GPU memory)──►  SpoutReceiver.receiveImage()
+jaringan ──(NDI)────────────────────►  recv_capture_v2()          │
+layar  ──(QScreen.grabWindow)───────►  _ScreenGrabber.take()      ├─► satu buffer pool
+berkas ──(QImage / QMovie)──────────►  frame_from_qimage()        │
                                             │  mengisi buffer dari pool
                                             ▼
                                         Frame(buffer, w, h, premultiplied)
@@ -115,15 +122,23 @@ premultiplied. Jadi kanal warna yang keluar dari Spout Filter **sudah dikalikan 
 `Frame.premultiplied` membawa informasi ini, dan `OverlayWindow` memilih format QImage
 berdasarkan pasangan `(pixel_format, premultiplied)`:
 
-| Sumber | Format QImage |
-|---|---|
-| Spout dari OBS | `Format_RGBA8888_Premultiplied` |
-| Pola uji bawaan | `Format_RGBA8888` |
+| Sumber | Format piksel | Format QImage |
+|---|---|---|
+| Spout dari OBS | RGBA8888 | `Format_RGBA8888_Premultiplied` |
+| NDI | BGRA8888 | `Format_ARGB32` (straight, sesuai spesifikasi NDI) |
+| Tangkapan layar | RGBA8888 | `Format_RGBA8888` (selalu opaque) |
+| Berkas gambar | RGBA8888 | `Format_RGBA8888` |
+| Pola uji bawaan | RGBA8888 | `Format_RGBA8888` |
 
 Salah memilih di sini bukan kesalahan halus: menganggap data premultiplied sebagai
 straight membuat Qt mengalikan alpha untuk kedua kalinya, dan hasilnya **garis gelap di
-setiap tepi antialias**. Setelannya tetap bisa diubah pengguna di tab Source karena
-sender non-OBS (Resolume, TouchDesigner) bisa mengirim straight alpha.
+setiap tepi antialias**. Setelannya tetap bisa diubah pengguna per sumber di tab Source
+karena sender non-OBS (Resolume, TouchDesigner) bisa mengirim straight alpha, dan ada
+pengirim NDI yang menyalahi spesifikasinya sendiri.
+
+NDI menambah satu jebakan lagi: FourCC-nya bisa `BGRA` **atau** `BGRX`. Pada `BGRX` byte
+keempat adalah padding, bukan alpha, dan isinya tidak dijamin apa pun — jadi kanal itu
+dipaksa 255. Tanpa itu, frame opaque bisa datang sebagai frame yang hilang seluruhnya.
 
 ---
 
@@ -259,29 +274,90 @@ Hasilnya bundle jauh lebih kecil dan satu sumber kebenaran untuk rendering.
 
 ---
 
+## Keputusan 10 — Tangkapan layar ditarik, bukan didorong
+
+`QScreen.grabWindow()` tidak aman dipanggil dari thread pekerja, tapi `VideoSource.capture()`
+justru selalu dipanggil dari thread producer. Ada dua cara keluar, dan yang jelas justru
+salah:
+
+- **Memblokir producer pada thread GUI** (`BlockingQueuedConnection`) akan **deadlock**.
+  `FrameProducer.stop()` berjalan di thread GUI dan menunggu worker selesai; kalau worker
+  saat itu sedang menunggu thread GUI, keduanya menunggu selamanya.
+- **Menarik, bukan mendorong** — yang dipakai. `_ScreenGrabber` hidup di thread GUI dengan
+  `QTimer` miliknya sendiri, menaruh `QImage` terbaru di balik `QMutex`, dan
+  `ScreenSource.capture()` sekadar mengambil apa yang ada. Tidak ada yang pernah menunggu
+  siapa pun.
+
+`QImage` bersifat implicitly shared, jadi publikasi hanya menaikkan refcount: lock dipegang
+dalam hitungan mikrodetik, tidak pernah selama penyalinan.
+
+`QTimer` grabber sengaja dibuat di dalam slot `start()`, bukan di `__init__`, karena timer
+harus dimiliki thread yang akan menjalankannya — dan `__init__` berjalan di thread
+producer. Perintah start/stop dikirim `QMetaObject.invokeMethod(...)` dengan
+`QueuedConnection`, tidak pernah blocking, dengan alasan yang sama seperti di atas.
+
+Laju grab dibatasi 120 fps apa pun isi profil. Tangkapan desktop mahal dan tidak ada yang
+butuh di atas refresh layar.
+
+---
+
+## Keputusan 11 — Notifikasi dan repaint di-coalesce
+
+Producer memberi tahu thread GUI lewat signal `frameAvailable`, dan signal antar-thread
+jadi *posted event*. Kalau producer memancarkannya per frame sementara GUI sedang sibuk,
+antrean event tumbuh tanpa batas — dan antrean yang penuh membuat Qt kelaparan menjalankan
+timer, termasuk timer yang dibutuhkan untuk melukis.
+
+Karena itu dua hal digabungkan:
+
+- **`FrameProducer._publish()`** hanya memancarkan `frameAvailable` kalau tidak ada
+  notifikasi yang masih menunggu. `take_frame()` membersihkan tanda itu. Frame terbarunya
+  tetap latest-wins; yang dibatasi cuma jumlah sinyalnya.
+- **`OverlayWindow.request_repaint()`** menelan `update()` berulang selama satu repaint
+  masih tertunda. `paintEvent` membersihkan tanda itu lebih dulu, sebelum melukis, supaya
+  perubahan yang datang saat melukis tetap memicu repaint berikutnya.
+
+Keduanya mengubah *laju notifikasi*, bukan isi datanya: frame yang dilihat pengguna selalu
+yang paling baru.
+
+---
+
 ## Threading
 
 | Thread | Milik | Tugas |
 |---|---|---|
-| GUI | `QApplication` | Semua widget, semua `paintEvent`, semua mutasi profil |
+| GUI | `QApplication` | Semua widget, semua `paintEvent`, semua mutasi profil, `_ScreenGrabber` |
 | Producer | `FrameProducer(QThread)` | Konteks WGL, `VideoSource`, pacing |
 
-Penyeberangan antar-thread cuma dua, keduanya lewat signal Qt:
+Penyeberangan antar-thread cuma tiga, semuanya lewat mekanisme Qt:
 
-- `frameAvailable` → GUI memanggil `take_frame()` (dilindungi `QMutex`)
+- `frameAvailable` → GUI memanggil `take_frame()` (dilindungi `QMutex`, di-coalesce)
 - `statusChanged` / `failed` → GUI memperbarui panel, tray, dan HUD
+- `_ScreenGrabber.take()` → producer mengambil `QImage` terbaru (dilindungi `QMutex`)
 
-Tidak ada widget yang pernah disentuh dari thread producer.
+Tidak ada widget yang pernah disentuh dari thread producer. `_ScreenGrabber` bukan widget,
+dan satu-satunya yang menyentuhnya dari thread producer adalah `take()` yang dikunci; semua
+sisanya dijalankan lewat slot di thread GUI.
+
+`FrameProducer` menyimpan **salinan** `SourceSettings` (`deepcopy`), bukan referensi ke
+objek profil. Kalau tidak, `_needs_reopen()` akan membandingkan sebuah objek dengan dirinya
+sendiri — profil sudah berubah di tempat sebelum perbandingan sempat terjadi — dan
+mengganti nama sender tidak akan pernah memicu sambung ulang.
 
 ---
 
 ## Kenapa semuanya bisa diuji
 
-308 tes berjalan di Linux tanpa GPU, tanpa OBS, tanpa Windows:
+378 tes berjalan di Linux tanpa GPU, tanpa OBS, tanpa Windows:
 
 - **Matematika editor** murni fungsi atas `RectSpec` → diuji langsung.
 - **Parser hotkey** dipisah dari `ctypes` ke `hotkey_spec.py` → diuji di mana saja.
 - **Lapisan native** punya implementasi Null yang jujur melaporkan "tidak didukung".
 - **Sumber uji bawaan** memberi pipeline frame yang nyata tanpa perangkat keras.
 - **Qt** berjalan dengan platform plugin `offscreen`, sehingga masking, rendering, dan
-  interaksi editor benar-benar dieksekusi, bukan hanya di-mock.
+  interaksi editor benar-benar dieksekusi, bukan hanya di-mock. Ini juga berarti
+  **tangkapan layar dan berkas gambar bisa diuji sungguhan** — keduanya cuma butuh Qt.
+- **Sumber yang butuh perangkat keras atau jaringan** (Spout, NDI) diuji sampai batas yang
+  jujur: konstruksi, pesan kegagalan, dan pilihan format. Jalur penerimaannya sendiri tidak
+  pernah dijalankan di CI, dan docstring modulnya menyatakan itu apa adanya alih-alih
+  berpura-pura sudah terbukti.

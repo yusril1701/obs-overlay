@@ -209,10 +209,35 @@ class TestProfile:
         assert profile.display.geometry_mode is GeometryMode.PRIMARY
         assert profile.display.scale_quality is ScaleQuality.SMOOTH
 
-    def test_premultiplied_defaults_true(self):
+    def test_spout_premultiplied_defaults_true(self):
         # The OBS Spout filter composites with premultiplied alpha, so this is
         # the correct default for the supported path.
-        assert Profile.default().source.premultiplied_alpha is True
+        assert Profile.default().source.spout.premultiplied_alpha is True
+
+    def test_ndi_premultiplied_defaults_false(self):
+        # NDI's specification is explicit that its RGBA data is not
+        # premultiplied — the opposite of Spout.
+        assert Profile.default().source.ndi.premultiplied_alpha is False
+
+    def test_every_source_group_survives_a_round_trip(self):
+        profile = Profile.default()
+        profile.source.spout.sender_name = "A"
+        profile.source.ndi.source_name = "B"
+        profile.source.screen.monitor_index = 2
+        profile.source.image.path = "/tmp/x.png"
+
+        restored = Profile.from_dict(profile.to_dict())
+        assert restored.source.spout.sender_name == "A"
+        assert restored.source.ndi.source_name == "B"
+        assert restored.source.screen.monitor_index == 2
+        assert restored.source.image.path == "/tmp/x.png"
+
+    def test_inactive_source_groups_are_kept(self):
+        # Switching kind must not discard what the other kinds were set to.
+        profile = Profile.default()
+        profile.source.ndi.source_name = "Remembered"
+        profile.source.kind = SourceKind.SCREEN
+        assert Profile.from_dict(profile.to_dict()).source.ndi.source_name == "Remembered"
 
 
 class TestAppSettings:

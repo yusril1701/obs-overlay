@@ -12,7 +12,12 @@ Version history
     plus a top-level ``sender`` string, mirroring the pseudocode in the
     project blueprint. Hand-written configs may still look like this.
 2
-    The current layout: grouped settings objects and rich ``parcels``.
+    Grouped settings objects and rich ``parcels``, with a single Spout-shaped
+    ``source`` block.
+3
+    The current layout. ``source`` now carries one settings group per source
+    kind (``spout``, ``ndi``, ``screen``, ``image``), because the overlay can
+    be fed from more than Spout.
 """
 
 from __future__ import annotations
@@ -88,9 +93,35 @@ def _migrate_1_to_2(data: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
+#: Spout fields that lived directly on ``source`` before schema 3.
+_SPOUT_FIELDS = ("sender_name", "auto_select_sender", "invert_y", "premultiplied_alpha")
+
+
+def _migrate_2_to_3(data: dict[str, Any]) -> dict[str, Any]:
+    """Single Spout-shaped ``source`` block → one group per source kind."""
+    result = dict(data)
+    source = dict(result.get("source") or {})
+
+    spout = dict(source.get("spout") or {})
+    for key in _SPOUT_FIELDS:
+        if key in source:
+            # A value already written under the new key wins, so re-running the
+            # migration cannot clobber newer data.
+            spout.setdefault(key, source.pop(key))
+        else:
+            source.pop(key, None)
+
+    if spout:
+        source["spout"] = spout
+    result["source"] = source
+    result["schema_version"] = 3
+    return result
+
+
 #: Keyed by the version being migrated *from*.
 MIGRATIONS: dict[int, MigrationStep] = {
     1: _migrate_1_to_2,
+    2: _migrate_2_to_3,
 }
 
 

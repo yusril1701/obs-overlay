@@ -176,7 +176,16 @@ class ScaleQuality(str, Enum):
 
 
 class SourceKind(str, Enum):
+    """Where the overlay's pixels come from.
+
+    Each kind has its own settings group on :class:`SourceSettings`; the common
+    fields (frame rate, reconnect policy) stay on the parent.
+    """
+
     SPOUT = "spout"
+    NDI = "ndi"
+    SCREEN = "screen"
+    IMAGE = "image"
     DEMO = "demo"
 
 
@@ -368,17 +377,12 @@ class Parcel:
 
 
 @dataclass
-class SourceSettings:
-    kind: SourceKind = SourceKind.SPOUT
+class SpoutSettings:
+    """Settings for the OBS / Spout2 receiver."""
+
     sender_name: str = DEFAULT_SENDER_NAME
     #: When the named sender is absent, fall back to whichever sender exists.
     auto_select_sender: bool = True
-    target_fps: int = DEFAULT_TARGET_FPS
-    auto_reconnect: bool = True
-    #: Fall back to the built-in test pattern when no sender ever appears, so
-    #: the user can still lay out parcels. Off by default: a silent switch to a
-    #: test pattern during a live stream would be worse than an empty overlay.
-    fallback_to_demo: bool = False
     #: Ask Spout to flip rows during the receive. Cheaper than flipping in the
     #: painter; needed when a sender delivers bottom-up textures.
     invert_y: bool = False
@@ -390,14 +394,158 @@ class SourceSettings:
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "kind": self.kind.value,
             "sender_name": self.sender_name,
             "auto_select_sender": self.auto_select_sender,
+            "invert_y": self.invert_y,
+            "premultiplied_alpha": self.premultiplied_alpha,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Any) -> SpoutSettings:
+        data = _as_dict(data)
+        return cls(
+            sender_name=_as_str(data.get("sender_name"), DEFAULT_SENDER_NAME, max_len=256),
+            auto_select_sender=_as_bool(data.get("auto_select_sender"), True),
+            invert_y=_as_bool(data.get("invert_y"), False),
+            premultiplied_alpha=_as_bool(data.get("premultiplied_alpha"), True),
+        )
+
+
+@dataclass
+class NdiSettings:
+    """Settings for the NDI receiver.
+
+    ``premultiplied_alpha`` defaults to False because the NDI specification is
+    explicit that RGBA data "is not pre-multiplied". It is still exposed
+    because some senders (notably OBS via DistroAV) do emit premultiplied
+    frames, and only the eye can tell.
+    """
+
+    source_name: str = ""
+    #: Connect to whatever NDI source is on the network when the named one is
+    #: absent. NDI names are long ("MACHINE (OBS)"), so typos are likely.
+    auto_select_source: bool = True
+    premultiplied_alpha: bool = False
+    #: Ask NDI for a proxy-resolution stream. Much less network traffic, at the
+    #: cost of resolution — useful for laying out parcels over a slow link.
+    low_bandwidth: bool = False
+    #: How long a single receive call may block, in milliseconds. The producer
+    #: paces itself, so this only needs to be long enough to catch a frame.
+    receive_timeout_ms: int = 80
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "source_name": self.source_name,
+            "auto_select_source": self.auto_select_source,
+            "premultiplied_alpha": self.premultiplied_alpha,
+            "low_bandwidth": self.low_bandwidth,
+            "receive_timeout_ms": self.receive_timeout_ms,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Any) -> NdiSettings:
+        data = _as_dict(data)
+        return cls(
+            source_name=_as_str(data.get("source_name"), "", max_len=256),
+            auto_select_source=_as_bool(data.get("auto_select_source"), True),
+            premultiplied_alpha=_as_bool(data.get("premultiplied_alpha"), False),
+            low_bandwidth=_as_bool(data.get("low_bandwidth"), False),
+            receive_timeout_ms=_as_int(data.get("receive_timeout_ms"), 80, lo=0, hi=5000),
+        )
+
+
+@dataclass
+class ScreenSettings:
+    """Settings for desktop capture.
+
+    ``region`` is relative to the chosen monitor's top-left corner, not to the
+    virtual desktop, so a layout stays put when monitors are rearranged.
+    """
+
+    monitor_index: int = 0
+    use_region: bool = False
+    region: RectSpec = field(default_factory=lambda: RectSpec(0, 0, 1280, 720))
+    #: Automatically hide the overlay from screen capture when the captured
+    #: area overlaps the overlay itself, which would otherwise recurse.
+    avoid_self_capture: bool = True
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "monitor_index": self.monitor_index,
+            "use_region": self.use_region,
+            "region": self.region.to_dict(),
+            "avoid_self_capture": self.avoid_self_capture,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Any) -> ScreenSettings:
+        data = _as_dict(data)
+        raw_region = RectSpec.from_dict(data.get("region"))
+        return cls(
+            monitor_index=_as_int(data.get("monitor_index"), 0, lo=0, hi=63),
+            use_region=_as_bool(data.get("use_region"), False),
+            region=RectSpec(
+                raw_region.x,
+                raw_region.y,
+                max(1, raw_region.width) if raw_region.width else 1280,
+                max(1, raw_region.height) if raw_region.height else 720,
+            ),
+            avoid_self_capture=_as_bool(data.get("avoid_self_capture"), True),
+        )
+
+
+@dataclass
+class ImageSettings:
+    """Settings for a still or animated image used as the overlay content."""
+
+    path: str = ""
+    #: Play GIF/WebP animations. Off means the first frame is shown as a still.
+    animate: bool = True
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"path": self.path, "animate": self.animate}
+
+    @classmethod
+    def from_dict(cls, data: Any) -> ImageSettings:
+        data = _as_dict(data)
+        return cls(
+            path=_as_str(data.get("path"), "", max_len=4096),
+            animate=_as_bool(data.get("animate"), True),
+        )
+
+
+@dataclass
+class SourceSettings:
+    """Which source feeds the overlay, plus every source's own settings.
+
+    The per-kind groups are all kept, not just the active one, so switching
+    back and forth does not lose what you configured.
+    """
+
+    kind: SourceKind = SourceKind.SPOUT
+    target_fps: int = DEFAULT_TARGET_FPS
+    auto_reconnect: bool = True
+    #: Fall back to the built-in test pattern when the real source is
+    #: unavailable, so the user can still lay out parcels. Off by default: a
+    #: silent switch to a test pattern mid-stream would be worse than an empty
+    #: overlay.
+    fallback_to_demo: bool = False
+
+    spout: SpoutSettings = field(default_factory=SpoutSettings)
+    ndi: NdiSettings = field(default_factory=NdiSettings)
+    screen: ScreenSettings = field(default_factory=ScreenSettings)
+    image: ImageSettings = field(default_factory=ImageSettings)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "kind": self.kind.value,
             "target_fps": self.target_fps,
             "auto_reconnect": self.auto_reconnect,
             "fallback_to_demo": self.fallback_to_demo,
-            "invert_y": self.invert_y,
-            "premultiplied_alpha": self.premultiplied_alpha,
+            "spout": self.spout.to_dict(),
+            "ndi": self.ndi.to_dict(),
+            "screen": self.screen.to_dict(),
+            "image": self.image.to_dict(),
         }
 
     @classmethod
@@ -405,15 +553,15 @@ class SourceSettings:
         data = _as_dict(data)
         return cls(
             kind=_as_enum(SourceKind, data.get("kind"), SourceKind.SPOUT),
-            sender_name=_as_str(data.get("sender_name"), DEFAULT_SENDER_NAME, max_len=256),
-            auto_select_sender=_as_bool(data.get("auto_select_sender"), True),
             target_fps=_as_int(
                 data.get("target_fps"), DEFAULT_TARGET_FPS, lo=MIN_TARGET_FPS, hi=MAX_TARGET_FPS
             ),
             auto_reconnect=_as_bool(data.get("auto_reconnect"), True),
             fallback_to_demo=_as_bool(data.get("fallback_to_demo"), False),
-            invert_y=_as_bool(data.get("invert_y"), False),
-            premultiplied_alpha=_as_bool(data.get("premultiplied_alpha"), True),
+            spout=SpoutSettings.from_dict(data.get("spout")),
+            ndi=NdiSettings.from_dict(data.get("ndi")),
+            screen=ScreenSettings.from_dict(data.get("screen")),
+            image=ImageSettings.from_dict(data.get("image")),
         )
 
 

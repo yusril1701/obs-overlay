@@ -565,3 +565,51 @@ class TestEditorKeyboard:
             _key(Qt.Key.Key_BracketRight, Qt.KeyboardModifier.ControlModifier)
         )
         assert overlay.profile.parcels[-1].id == first.id
+
+
+class TestRepaintCoalescing:
+    """At most one paint in flight.
+
+    Frames arrive faster than a full-screen composite can be painted, so an
+    unbounded stream of update requests keeps the event loop permanently busy
+    and starves timers.
+    """
+
+    def test_repeated_requests_stay_pending_once(self, overlay):
+        overlay._repaint_pending = False
+        overlay.request_repaint()
+        assert overlay._repaint_pending is True
+        overlay.request_repaint()
+        overlay.request_repaint()
+        assert overlay._repaint_pending is True
+
+    def test_painting_re_arms(self, overlay, qapp):
+        from PyQt6.QtGui import QImage
+
+        overlay.request_repaint()
+        assert overlay._repaint_pending is True
+
+        image = QImage(64, 64, QImage.Format.Format_ARGB32_Premultiplied)
+        image.fill(0)
+        overlay.render(image)
+        assert overlay._repaint_pending is False
+
+        overlay.request_repaint()
+        assert overlay._repaint_pending is True
+
+    def test_new_frames_do_not_pile_up_requests(self, overlay, qapp):
+        from obs_overlay.core.frame import FrameBufferPool, required_buffer_size
+        from obs_overlay.sources.demo_source import DemoSource
+
+        source = DemoSource(64, 64)
+        source.open()
+        pool = FrameBufferPool(required_buffer_size(64, 64), 3)
+
+        overlay._repaint_pending = False
+        for _ in range(3):
+            frame = source.capture(pool)
+            if frame is not None:
+                overlay.set_frame(frame)
+        # Still just the one outstanding request.
+        assert overlay._repaint_pending is True
+        overlay.clear_frame()

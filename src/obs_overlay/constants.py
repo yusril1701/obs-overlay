@@ -10,9 +10,12 @@ import sys
 
 APP_NAME = "OBS Overlay"
 APP_SLUG = "obs-overlay"
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.1.0"
 ORG_NAME = "obs-overlay"
-APP_DESCRIPTION = "Transparent click-through OBS Spout2 overlay with window masking"
+APP_DESCRIPTION = (
+    "Transparent click-through overlay with window masking, fed from OBS/Spout2, "
+    "NDI, screen capture or an image"
+)
 
 IS_WINDOWS = sys.platform == "win32"
 
@@ -21,7 +24,7 @@ IS_WINDOWS = sys.platform == "win32"
 # --------------------------------------------------------------------------
 #: Bumped whenever the on-disk profile layout changes in a way that needs a
 #: migration step. ``config.migrations`` must gain an entry for every bump.
-PROFILE_SCHEMA_VERSION = 2
+PROFILE_SCHEMA_VERSION = 3
 
 DEFAULT_PROFILE_NAME = "Default"
 PROFILE_SUFFIX = ".json"

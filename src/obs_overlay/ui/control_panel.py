@@ -17,14 +17,17 @@ import logging
 from PyQt6.QtCore import QTimer, pyqtSignal
 from PyQt6.QtGui import QCloseEvent, QGuiApplication
 from PyQt6.QtWidgets import (
+    QApplication,
     QComboBox,
     QFileDialog,
     QGroupBox,
     QHBoxLayout,
     QInputDialog,
     QLabel,
+    QLineEdit,
     QMessageBox,
     QSizePolicy,
+    QStackedWidget,
     QTabWidget,
     QVBoxLayout,
     QWidget,
@@ -48,7 +51,12 @@ from ..constants import APP_NAME, APP_VERSION, MAX_TARGET_FPS, MIN_TARGET_FPS
 from ..core import geometry as geo
 from ..core.fps import StatsSnapshot
 from ..sources.base import SourceInfo, SourceState
-from ..sources.registry import available_sender_names, spout_available
+from ..sources.registry import (
+    available_sender_names,
+    ndi_available,
+    spout_available,
+    unavailable_reason,
+)
 from . import widgets as W
 from .icons import app_icon
 from .parcel_table import ParcelTable, apply_edit
@@ -167,31 +175,33 @@ class ControlPanel(QWidget):
         layout = W.form()
 
         self._source_kind = W.combo(
-            (("OBS via Spout2", SourceKind.SPOUT), ("Built-in test pattern", SourceKind.DEMO))
+            (
+                ("OBS via Spout2", SourceKind.SPOUT),
+                ("NDI (network)", SourceKind.NDI),
+                ("Screen capture", SourceKind.SCREEN),
+                ("Image file", SourceKind.IMAGE),
+                ("Built-in test pattern", SourceKind.DEMO),
+            )
         )
-        self._source_kind.currentIndexChanged.connect(
-            lambda: self._edit(SECTION_SOURCE, kind=self._source_kind.currentData())
-        )
+        self._source_kind.currentIndexChanged.connect(self._on_source_kind_changed)
         layout.addRow("Source", self._source_kind)
 
-        self._sender_combo = QComboBox()
-        self._sender_combo.setEditable(True)
-        self._sender_combo.setMinimumWidth(260)
-        sender_edit = self._sender_combo.lineEdit()
-        if sender_edit is not None:
-            sender_edit.editingFinished.connect(self._on_sender_text_changed)
-        self._sender_combo.activated.connect(self._on_sender_text_changed)
-        refresh = W.button("Refresh", self.refresh_senders, tooltip="Re-scan for Spout senders.")
-        layout.addRow("Sender name", W.row(self._sender_combo, refresh, stretch_last=False))
+        self._kind_warning = W.hint_label("")
+        layout.addRow("", self._kind_warning)
 
-        self._auto_select = W.checkbox(
-            "Use any available sender when the named one is missing",
-            tooltip="Leave the name empty to always follow whichever sender OBS makes active.",
-        )
-        self._auto_select.toggled.connect(
-            lambda v: self._edit(SECTION_SOURCE, auto_select_sender=v)
-        )
-        layout.addRow("", self._auto_select)
+        # Only the active kind's settings are shown, but every kind's values
+        # are kept in the profile, so switching back and forth loses nothing.
+        self._source_pages = QStackedWidget()
+        self._source_page_index: dict[SourceKind, int] = {}
+        for kind, builder in (
+            (SourceKind.SPOUT, self._build_spout_page),
+            (SourceKind.NDI, self._build_ndi_page),
+            (SourceKind.SCREEN, self._build_screen_page),
+            (SourceKind.IMAGE, self._build_image_page),
+            (SourceKind.DEMO, self._build_demo_page),
+        ):
+            self._source_page_index[kind] = self._source_pages.addWidget(builder())
+        layout.addRow(self._source_pages)
 
         self._target_fps = W.spin(MIN_TARGET_FPS, MAX_TARGET_FPS, 60, suffix=" fps")
         self._target_fps.valueChanged.connect(lambda v: self._edit(SECTION_SOURCE, target_fps=v))
@@ -202,7 +212,7 @@ class ControlPanel(QWidget):
         layout.addRow("", self._auto_reconnect)
 
         self._fallback_demo = W.checkbox(
-            "Fall back to the test pattern when Spout is unavailable",
+            "Fall back to the test pattern when the source is unavailable",
             tooltip="Off by default: during a live stream an empty overlay is safer "
             "than a test pattern appearing unannounced.",
         )
@@ -210,26 +220,6 @@ class ControlPanel(QWidget):
             lambda v: self._edit(SECTION_SOURCE, fallback_to_demo=v)
         )
         layout.addRow("", self._fallback_demo)
-
-        self._invert_y = W.checkbox(
-            "Flip vertically during receive",
-            tooltip="Use this if the feed arrives upside down. Cheaper than flipping "
-            "in the Display tab because Spout does it for free.",
-        )
-        self._invert_y.toggled.connect(lambda v: self._edit(SECTION_SOURCE, invert_y=v))
-        layout.addRow("", self._invert_y)
-
-        self._premultiplied = W.checkbox(
-            "Sender uses premultiplied alpha",
-            tooltip="Leave this on for the OBS 'Spout Filter', which composites "
-            "with premultiplied alpha. Turning it off for such a sender produces "
-            "dark fringes around soft edges; leaving it on for a straight-alpha "
-            "sender washes them out.",
-        )
-        self._premultiplied.toggled.connect(
-            lambda v: self._edit(SECTION_SOURCE, premultiplied_alpha=v)
-        )
-        layout.addRow("", self._premultiplied)
 
         group.setLayout(layout)
 
@@ -252,15 +242,232 @@ class ControlPanel(QWidget):
 
         return W.column(group, status_group, self._spacer(), margins=4)
 
+    # -- per-kind pages ----------------------------------------------------
+    def _build_spout_page(self) -> QWidget:
+        layout = W.form()
+
+        self._sender_combo = QComboBox()
+        self._sender_combo.setEditable(True)
+        self._sender_combo.setMinimumWidth(260)
+        sender_edit = self._sender_combo.lineEdit()
+        if sender_edit is not None:
+            sender_edit.editingFinished.connect(self._on_sender_text_changed)
+        self._sender_combo.activated.connect(self._on_sender_text_changed)
+        refresh = W.button("Refresh", self.refresh_senders, tooltip="Re-scan for Spout senders.")
+        layout.addRow("Sender name", W.row(self._sender_combo, refresh, stretch_last=False))
+
+        self._auto_select = W.checkbox(
+            "Use any available sender when the named one is missing",
+            tooltip="Leave the name empty to always follow whichever sender OBS makes active.",
+        )
+        self._auto_select.toggled.connect(lambda v: self._edit_spout(auto_select_sender=v))
+        layout.addRow("", self._auto_select)
+
+        self._invert_y = W.checkbox(
+            "Flip vertically during receive",
+            tooltip="Use this if the feed arrives upside down. Cheaper than flipping "
+            "in the Display tab because Spout does it for free.",
+        )
+        self._invert_y.toggled.connect(lambda v: self._edit_spout(invert_y=v))
+        layout.addRow("", self._invert_y)
+
+        self._premultiplied = W.checkbox(
+            "Sender uses premultiplied alpha",
+            tooltip="Leave this on for the OBS 'Spout Filter', which composites "
+            "with premultiplied alpha. Turning it off for such a sender produces "
+            "dark fringes around soft edges; leaving it on for a straight-alpha "
+            "sender washes them out.",
+        )
+        self._premultiplied.toggled.connect(lambda v: self._edit_spout(premultiplied_alpha=v))
+        layout.addRow("", self._premultiplied)
+
+        return self._page(layout)
+
+    def _build_ndi_page(self) -> QWidget:
+        layout = W.form()
+
+        self._ndi_combo = QComboBox()
+        self._ndi_combo.setEditable(True)
+        self._ndi_combo.setMinimumWidth(280)
+        ndi_edit = self._ndi_combo.lineEdit()
+        if ndi_edit is not None:
+            ndi_edit.editingFinished.connect(self._on_ndi_text_changed)
+        self._ndi_combo.activated.connect(self._on_ndi_text_changed)
+        refresh = W.button(
+            "Scan", self.refresh_ndi_sources, tooltip="Look for NDI sources on the network."
+        )
+        layout.addRow("NDI source", W.row(self._ndi_combo, refresh, stretch_last=False))
+
+        self._ndi_auto = W.checkbox("Use any available source when the named one is missing")
+        self._ndi_auto.toggled.connect(lambda v: self._edit_ndi(auto_select_source=v))
+        layout.addRow("", self._ndi_auto)
+
+        self._ndi_premultiplied = W.checkbox(
+            "Source uses premultiplied alpha",
+            tooltip="Off by default: the NDI specification says its RGBA data is "
+            "not premultiplied. Turn it on if soft edges look washed out.",
+        )
+        self._ndi_premultiplied.toggled.connect(lambda v: self._edit_ndi(premultiplied_alpha=v))
+        layout.addRow("", self._ndi_premultiplied)
+
+        self._ndi_low_bandwidth = W.checkbox(
+            "Low bandwidth (proxy resolution)",
+            tooltip="Much less network traffic at a lower resolution. Useful for "
+            "laying out parcels over a slow link.",
+        )
+        self._ndi_low_bandwidth.toggled.connect(lambda v: self._edit_ndi(low_bandwidth=v))
+        layout.addRow("", self._ndi_low_bandwidth)
+
+        layout.addRow(
+            "",
+            W.hint_label(
+                "NDI needs the 'ndi-python' package and the NDI Runtime, which is "
+                "installed separately because of its licence."
+            ),
+        )
+        return self._page(layout)
+
+    def _build_screen_page(self) -> QWidget:
+        layout = W.form()
+
+        self._screen_monitor = QComboBox()
+        self._screen_monitor.currentIndexChanged.connect(self._on_screen_monitor_changed)
+        layout.addRow("Monitor", self._screen_monitor)
+
+        self._screen_use_region = W.checkbox("Capture only part of the monitor")
+        self._screen_use_region.toggled.connect(self._on_screen_region_toggled)
+        layout.addRow("", self._screen_use_region)
+
+        self._screen_x = W.spin(0, 32000, 0, suffix=" px")
+        self._screen_y = W.spin(0, 32000, 0, suffix=" px")
+        self._screen_w = W.spin(1, 32000, 1280, suffix=" px")
+        self._screen_h = W.spin(1, 32000, 720, suffix=" px")
+        for box in (self._screen_x, self._screen_y, self._screen_w, self._screen_h):
+            box.valueChanged.connect(self._on_screen_region_changed)
+        layout.addRow(
+            "Region",
+            W.row(
+                QLabel("X"),
+                self._screen_x,
+                QLabel("Y"),
+                self._screen_y,
+                QLabel("W"),
+                self._screen_w,
+                QLabel("H"),
+                self._screen_h,
+            ),
+        )
+        layout.addRow("", W.hint_label("Coordinates are relative to the chosen monitor."))
+
+        self._screen_avoid_self = W.checkbox(
+            "Hide the overlay from its own capture",
+            tooltip="Capturing the display the overlay sits on makes it photograph "
+            "itself, producing an infinite tunnel. This turns on capture exclusion "
+            "automatically when the two overlap.",
+        )
+        self._screen_avoid_self.toggled.connect(lambda v: self._edit_screen(avoid_self_capture=v))
+        layout.addRow("", self._screen_avoid_self)
+
+        return self._page(layout)
+
+    def _build_image_page(self) -> QWidget:
+        layout = W.form()
+
+        self._image_path = QLineEdit()
+        self._image_path.setMinimumWidth(280)
+        self._image_path.setPlaceholderText("Choose a PNG, GIF or WebP…")
+        self._image_path.editingFinished.connect(self._on_image_path_changed)
+        browse = W.button("Browse…", self._browse_image)
+        layout.addRow("Image file", W.row(self._image_path, browse, stretch_last=True))
+
+        self._image_animate = W.checkbox(
+            "Play animation",
+            tooltip="Applies to GIF and animated WebP. Off shows the first frame only.",
+        )
+        self._image_animate.toggled.connect(lambda v: self._edit_image(animate=v))
+        layout.addRow("", self._image_animate)
+
+        layout.addRow(
+            "",
+            W.hint_label(
+                "A PNG with transparency is the quickest way to put a logo or a "
+                "frame on screen — no OBS, no network."
+            ),
+        )
+        return self._page(layout)
+
+    def _build_demo_page(self) -> QWidget:
+        layout = W.form()
+        layout.addRow(
+            "",
+            W.hint_label(
+                "An animated pattern with genuinely transparent areas. Use it to lay "
+                "out parcels before OBS is running, and to confirm that the alpha "
+                "path works end to end."
+            ),
+        )
+        return self._page(layout)
+
+    @staticmethod
+    def _page(layout: object) -> QWidget:
+        page = QWidget()
+        page.setLayout(layout)  # type: ignore[arg-type]
+        return page
+
+    # -- per-kind editing --------------------------------------------------
+    def _edit_group(self, group: object, **changes: object) -> None:
+        """Apply changes to one source sub-group and announce the section."""
+        if self._loading:
+            return
+        for key, value in changes.items():
+            if hasattr(group, key):
+                setattr(group, key, value)
+            else:  # pragma: no cover - programming error
+                logger.warning("Unknown source setting %s", key)
+        self._emit(SECTION_SOURCE)
+
+    def _edit_spout(self, **changes: object) -> None:
+        self._edit_group(self._profile.source.spout, **changes)
+
+    def _edit_ndi(self, **changes: object) -> None:
+        self._edit_group(self._profile.source.ndi, **changes)
+
+    def _edit_screen(self, **changes: object) -> None:
+        self._edit_group(self._profile.source.screen, **changes)
+
+    def _edit_image(self, **changes: object) -> None:
+        self._edit_group(self._profile.source.image, **changes)
+
+    def _on_source_kind_changed(self) -> None:
+        kind = self._source_kind.currentData()
+        self._show_source_page(kind)
+        if self._loading:
+            return
+        self._edit(SECTION_SOURCE, kind=kind)
+        self._refresh_current_source_list()
+
+    def _show_source_page(self, kind: SourceKind) -> None:
+        index = self._source_page_index.get(kind)
+        if index is not None:
+            self._source_pages.setCurrentIndex(index)
+        reason = unavailable_reason(kind) if kind is not None else ""
+        self._kind_warning.setText(reason)
+        self._kind_warning.setProperty("role", "error" if reason else "hint")
+        style = self._kind_warning.style()
+        if style is not None:
+            style.unpolish(self._kind_warning)
+            style.polish(self._kind_warning)
+
+    # -- Spout -------------------------------------------------------------
     def _on_sender_text_changed(self) -> None:
         if self._loading:
             return
-        self._edit(SECTION_SOURCE, sender_name=self._sender_combo.currentText().strip())
+        self._edit_spout(sender_name=self._sender_combo.currentText().strip())
 
     def refresh_senders(self) -> None:
         """Re-scan Spout and repopulate the sender list."""
         current = self._sender_combo.currentText()
-        names = available_sender_names()
+        names = available_sender_names(SourceKind.SPOUT)
         self._loading = True
         try:
             self._sender_combo.clear()
@@ -270,11 +477,7 @@ class ControlPanel(QWidget):
             self._loading = False
 
         if not spout_available():
-            self._status.show_message(
-                "SpoutGL is not installed, so no senders can be listed. "
-                "Install it with: pip install SpoutGL  (Windows only)",
-                "error",
-            )
+            self._status.show_message(unavailable_reason(SourceKind.SPOUT), "error")
         elif names:
             self._status.show_message(f"Found {len(names)} Spout sender(s).", "success")
         else:
@@ -283,6 +486,96 @@ class ControlPanel(QWidget):
                 "the scene or source you want to send.",
                 "hint",
             )
+
+    # -- NDI ---------------------------------------------------------------
+    def _on_ndi_text_changed(self) -> None:
+        if self._loading:
+            return
+        self._edit_ndi(source_name=self._ndi_combo.currentText().strip())
+
+    def refresh_ndi_sources(self) -> None:
+        """Scan the network for NDI sources."""
+        if not ndi_available():
+            self._status.show_message(unavailable_reason(SourceKind.NDI), "error")
+            return
+
+        self._status.show_message("Scanning the network for NDI sources…", "hint")
+        QApplication.processEvents()
+
+        current = self._ndi_combo.currentText()
+        names = available_sender_names(SourceKind.NDI)
+        self._loading = True
+        try:
+            self._ndi_combo.clear()
+            self._ndi_combo.addItems(names)
+            self._ndi_combo.setEditText(current)
+        finally:
+            self._loading = False
+
+        if names:
+            self._status.show_message(f"Found {len(names)} NDI source(s).", "success")
+        else:
+            self._status.show_message(
+                "No NDI sources found. Check that the sender is on the same network "
+                "and that discovery (mDNS) is not blocked by a firewall.",
+                "hint",
+            )
+
+    # -- Screen ------------------------------------------------------------
+    def _on_screen_monitor_changed(self) -> None:
+        index = self._screen_monitor.currentData()
+        if index is not None:
+            self._edit_screen(monitor_index=int(index))
+
+    def _on_screen_region_toggled(self, enabled: bool) -> None:
+        for box in (self._screen_x, self._screen_y, self._screen_w, self._screen_h):
+            box.setEnabled(enabled)
+        self._edit_screen(use_region=enabled)
+
+    def _on_screen_region_changed(self) -> None:
+        self._edit_screen(
+            region=RectSpec(
+                self._screen_x.value(),
+                self._screen_y.value(),
+                max(1, self._screen_w.value()),
+                max(1, self._screen_h.value()),
+            )
+        )
+
+    def _populate_capture_monitors(self) -> None:
+        self._screen_monitor.clear()
+        for index, screen in enumerate(QGuiApplication.screens()):
+            rect = screen.geometry()
+            self._screen_monitor.addItem(
+                f"{index}: {screen.name()} ({rect.width()}×{rect.height()})", index
+            )
+
+    # -- Image -------------------------------------------------------------
+    def _on_image_path_changed(self) -> None:
+        if self._loading:
+            return
+        self._edit_image(path=self._image_path.text().strip())
+
+    def _browse_image(self) -> None:
+        from ..sources.image_source import supported_image_filter
+
+        start = self._profile.source.image.path or str(paths.data_dir())
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Choose an image", start, supported_image_filter()
+        )
+        if not path:
+            return
+        self._image_path.setText(path)
+        self._edit_image(path=path)
+
+    def _refresh_current_source_list(self) -> None:
+        """Populate the picker for whichever source kind is selected."""
+        kind = self._source_kind.currentData()
+        if kind is SourceKind.SPOUT:
+            self.refresh_senders()
+        elif kind is SourceKind.SCREEN:
+            self._populate_capture_monitors()
+            W.select_data(self._screen_monitor, self._profile.source.screen.monitor_index)
 
     # ------------------------------------------------------------------
     # Display tab
@@ -1047,6 +1340,9 @@ class ControlPanel(QWidget):
         self._spout_label = QLabel("—")
         layout.addRow("SpoutGL", self._spout_label)
 
+        self._ndi_label = QLabel("—")
+        layout.addRow("NDI", self._ndi_label)
+
         layout.addRow("Data folder", QLabel(str(paths.data_dir())))
         layout.addRow("Log file", QLabel(str(paths.logs_dir())))
         layout.addRow(
@@ -1093,13 +1389,35 @@ class ControlPanel(QWidget):
         try:
             source = profile.source
             W.select_data(self._source_kind, source.kind)
-            self._sender_combo.setEditText(source.sender_name)
-            self._auto_select.setChecked(source.auto_select_sender)
             self._target_fps.setValue(source.target_fps)
             self._auto_reconnect.setChecked(source.auto_reconnect)
             self._fallback_demo.setChecked(source.fallback_to_demo)
-            self._invert_y.setChecked(source.invert_y)
-            self._premultiplied.setChecked(source.premultiplied_alpha)
+
+            self._sender_combo.setEditText(source.spout.sender_name)
+            self._auto_select.setChecked(source.spout.auto_select_sender)
+            self._invert_y.setChecked(source.spout.invert_y)
+            self._premultiplied.setChecked(source.spout.premultiplied_alpha)
+
+            self._ndi_combo.setEditText(source.ndi.source_name)
+            self._ndi_auto.setChecked(source.ndi.auto_select_source)
+            self._ndi_premultiplied.setChecked(source.ndi.premultiplied_alpha)
+            self._ndi_low_bandwidth.setChecked(source.ndi.low_bandwidth)
+
+            self._populate_capture_monitors()
+            W.select_data(self._screen_monitor, source.screen.monitor_index)
+            self._screen_use_region.setChecked(source.screen.use_region)
+            self._screen_x.setValue(source.screen.region.x)
+            self._screen_y.setValue(source.screen.region.y)
+            self._screen_w.setValue(max(1, source.screen.region.width))
+            self._screen_h.setValue(max(1, source.screen.region.height))
+            self._screen_avoid_self.setChecked(source.screen.avoid_self_capture)
+            for box in (self._screen_x, self._screen_y, self._screen_w, self._screen_h):
+                box.setEnabled(source.screen.use_region)
+
+            self._image_path.setText(source.image.path)
+            self._image_animate.setChecked(source.image.animate)
+
+            self._show_source_page(source.kind)
 
             display = profile.display
             self._populate_monitors()
@@ -1152,13 +1470,19 @@ class ControlPanel(QWidget):
             self._spout_label.setText(
                 "installed" if spout_available() else "not installed (Windows only)"
             )
+            self._ndi_label.setText(
+                "installed" if ndi_available() else "not installed (needs the NDI Runtime)"
+            )
         finally:
             self._loading = False
 
         self._on_geometry_mode_changed_visual_only()
         self.refresh_profiles()
         self.refresh_parcels([])
-        self.refresh_senders()
+        # Only scan for the kind actually in use: an NDI scan takes a second
+        # and a Spout scan loads a native library, neither of which should
+        # happen just because a profile was opened.
+        self._refresh_current_source_list()
 
     def _on_geometry_mode_changed_visual_only(self) -> None:
         mode = self._geometry_mode.currentData()

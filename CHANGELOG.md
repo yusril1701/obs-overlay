@@ -3,6 +3,63 @@
 Format mengikuti [Keep a Changelog](https://keepachangelog.com/id/1.1.0/),
 versi mengikuti [Semantic Versioning](https://semver.org/lang/id/).
 
+## [1.1.0] — 2026-09-29
+
+Menambah sumber video selain OBS/Spout2. Overlay-nya sendiri tidak berubah — yang berubah
+hanya dari mana frame datang.
+
+### Ditambahkan
+
+- **NDI** (`ndi-python`): terima sumber video dari mesin lain di jaringan. Bisa memindai
+  sumber yang tersedia, mengikuti sumber mana pun kalau nama yang ditulis tidak ada, dan
+  mode *low bandwidth* untuk menata parsel lewat koneksi lambat.
+- **Screen capture**: tangkap satu monitor, atau sebuah region di dalamnya. Daftar monitor
+  mengikuti yang benar-benar tersambung.
+- **Image file**: tampilkan PNG, GIF, WebP, JPEG, atau BMP. Animasi GIF/WebP diputar lewat
+  `QMovie`; transparansi PNG dipertahankan apa adanya.
+- Tab **Source** kini berganti isi mengikuti sumber yang dipilih, dan menyebutkan alasan
+  persis kalau sebuah sumber tidak tersedia di mesin ini.
+- Pengaman **terowongan tak hingga**: saat `Screen capture` menangkap area yang
+  bersinggungan dengan overlay, capture exclusion dinyalakan otomatis.
+- CLI: `--source KIND`, `--image PATH`, `--capture-monitor INDEX`, dan
+  `--list-senders --source ndi|screen`.
+- Tab **About** menampilkan status NDI di samping status SpoutGL.
+- 70 tes baru (378 total), termasuk migrasi profil, kebijakan sambung-ulang, dan
+  penanganan alpha per sumber.
+
+### Diubah
+
+- `SourceSettings` dipecah menjadi grup per sumber (`spout`, `ndi`, `screen`, `image`),
+  sehingga setiap sumber menyimpan setelannya sendiri dan berpindah-pindah tidak
+  menghilangkan apa pun. Skema profil naik ke **v3**; profil v1 dan v2 dimigrasi otomatis
+  saat dibuka.
+- Bawaan alpha kini per sumber: premultiplied untuk Spout (OBS), straight untuk NDI (sesuai
+  spesifikasinya).
+- Teks "menunggu sumber" pada overlay menyesuaikan sumber yang dipilih, bukan selalu
+  menyebut Spout.
+
+### Diperbaiki
+
+- `FrameProducer` menyimpan **salinan** setelan sumber, bukan referensi ke objek profil.
+  Sebelumnya perbandingan "perlu buka ulang?" membandingkan sebuah objek dengan dirinya
+  sendiri, sehingga mengganti nama sender tidak pernah memicu sambung ulang.
+- Kegagalan membuka sumber kini dilaporkan lengkap dengan alasannya; sebelumnya
+  `close()` menghapus keterangan itu sebelum sempat ditampilkan.
+- Notifikasi frame dan permintaan repaint kini di-coalesce, sehingga antrean event Qt
+  tidak tumbuh tanpa batas saat thread GUI sedang sibuk.
+- `--list-senders --source screen` sempat tidak menampilkan apa pun karena objek
+  `QGuiApplication` sementaranya langsung dibuang Python sebelum monitor sempat dibaca.
+
+### Catatan
+
+- Ada kondisi *shutdown* yang belum terpecahkan: dengan QPA headless (`offscreen` /
+  `minimal`), `app.exec()` kadang tidak kembali saat overlay terlihat dan feed hidup.
+  Coalescing di atas menguranginya secara signifikan tapi tidak menghilangkannya, dan
+  penelusuran stack menunjukkan tidak ada kode aplikasi yang memblokir. Belum pernah
+  teramati pada jalur Windows yang sesungguhnya.
+
+---
+
 ## [1.0.0] — 2026-09-28
 
 Rilis pertama. Mencakup seluruh Fase 1–4 dari *Project Blueprint: OBS Spout to Python

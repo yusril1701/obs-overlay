@@ -7,19 +7,83 @@ di system tray, atau klik kanan overlay saat mode editor aktif.
 
 ## Tab Source — sumber video
 
+Pilihan **Source** di paling atas menentukan dari mana gambar datang. Setelan di
+bawahnya berganti mengikuti pilihan itu — tapi nilai untuk sumber lain **tidak
+hilang**, jadi berpindah bolak-balik aman.
+
+| Pilihan | Untuk apa | Butuh apa |
+|---|---|---|
+| `OBS via Spout2` | Scene OBS lengkap, alpha penuh, satu mesin | SpoutGL + filter Spout di OBS |
+| `NDI (network)` | Sumber dari mesin lain di jaringan | `ndi-python` + NDI Runtime |
+| `Screen capture` | Satu monitor atau sepotong area layar | tidak ada |
+| `Image file` | PNG/GIF/WebP — logo, bingkai, watermark | tidak ada |
+| `Built-in test pattern` | Menata parsel tanpa sumber apa pun | tidak ada |
+
+Kalau sumber yang dipilih tidak bisa dipakai di mesin ini, alasannya langsung
+muncul sebagai teks abu-abu di bawah pilihan — bukan baru ketahuan saat overlay
+diam.
+
+### Setelan yang berlaku untuk semua sumber
+
 | Setelan | Penjelasan |
 |---|---|
-| **Source** | `OBS via Spout2` untuk penggunaan normal, atau `Built-in test pattern` untuk menata parsel tanpa OBS. |
+| **Target rate** | Berapa kali per detik penerima memeriksa frame baru. Samakan dengan FPS sumber; lebih tinggi hanya membakar CPU. Untuk `Screen capture` ini sekaligus jadi laju grab, dibatasi 120 fps. |
+| **Reconnect automatically** | Coba sambung ulang terus-menerus saat sumber hilang, dengan jeda yang membesar (1 → 8 detik). |
+| **Fall back to the test pattern…** | Kalau dependensi sumber tidak terpasang, pakai pola uji. **Mati secara bawaan** — saat siaran langsung, overlay kosong lebih aman daripada pola uji muncul tiba-tiba. |
+
+Bagian **Connection** di bawahnya menunjukkan status, resolusi, FPS aktual, serta jumlah
+frame diterima dan dibuang, ditambah tombol **Reconnect now**.
+
+### `OBS via Spout2`
+
+| Setelan | Penjelasan |
+|---|---|
 | **Sender name** | Nama Spout sender. Klik **Refresh** untuk memindai. Kosongkan untuk selalu mengikuti sender yang sedang aktif. |
 | **Use any available sender…** | Kalau nama yang ditulis tidak sedang menyiarkan tapi ada sender lain, ikuti yang itu. Mencegah overlay diam menunggu nama yang salah ketik. |
-| **Target rate** | Berapa kali per detik penerima memeriksa frame baru. Samakan dengan FPS OBS; lebih tinggi hanya membakar CPU. |
-| **Reconnect automatically** | Coba sambung ulang terus-menerus saat sender hilang, dengan jeda yang membesar (1 → 8 detik). |
-| **Fall back to the test pattern…** | Kalau SpoutGL tidak terpasang, pakai pola uji. **Mati secara bawaan** — saat siaran langsung, overlay kosong lebih aman daripada pola uji muncul tiba-tiba. |
 | **Flip vertically during receive** | Balik baris piksel saat menerima. Pakai ini kalau feed terbalik; lebih murah daripada memutar di tab Display karena dikerjakan Spout. |
 | **Sender uses premultiplied alpha** | **Biarkan aktif untuk OBS.** Lihat [catatan alpha](#soal-alpha-premultiplied) di bawah. |
 
-Bagian **Connection** di bawahnya menunjukkan status, resolusi, FPS aktual, serta jumlah
-frame diterima dan dibuang.
+### `NDI (network)`
+
+| Setelan | Penjelasan |
+|---|---|
+| **NDI source** | Nama sumber, biasanya `MESIN (Nama Output)`. **Scan** memindai jaringan; pemindaian butuh beberapa detik karena NDI memakai mDNS. |
+| **Use any available source…** | Ikuti sumber pertama yang ditemukan kalau nama yang ditulis tidak ada. |
+| **Source uses premultiplied alpha** | **Mati secara bawaan** — spesifikasi NDI menyatakan datanya *tidak* premultiplied. Nyalakan hanya kalau tepi lembut terlihat pucat. |
+| **Low bandwidth (proxy resolution)** | Minta aliran resolusi rendah. Jauh lebih hemat jaringan, cocok saat menata parsel lewat koneksi lambat. |
+
+NDI butuh dua hal terpisah: paket Python `ndi-python` (`pip install ndi-python`)
+**dan** NDI Runtime dari NDI.tv, yang dipasang sendiri karena lisensinya.
+
+### `Screen capture`
+
+| Setelan | Penjelasan |
+|---|---|
+| **Monitor** | Monitor yang ditangkap. Daftarnya ikut monitor yang benar-benar tersambung. |
+| **Capture only part of the monitor** | Tangkap sepotong saja, bukan seluruh monitor. |
+| **Region X/Y/W/H** | Kotak yang ditangkap, **relatif terhadap sudut kiri-atas monitor yang dipilih**, bukan terhadap virtual desktop. |
+| **Hide the overlay from its own capture** | Lihat [terowongan tak hingga](#terowongan-tak-hingga) di bawah. Biarkan aktif. |
+
+### `Image file`
+
+| Setelan | Penjelasan |
+|---|---|
+| **Image file** | Berkas PNG, GIF, WebP, JPEG, atau BMP. Transparansi PNG/GIF/WebP dipertahankan apa adanya. |
+| **Play animation** | Untuk GIF dan WebP animasi. Kalau dimatikan, hanya frame pertama yang tampil. |
+
+Gambar diam dikirim sekali lalu berhenti — tidak ada CPU yang terpakai untuk
+menggambar ulang frame yang sama.
+
+### Terowongan tak hingga
+
+`Screen capture` yang menangkap monitor tempat overlay berada akan memotret
+overlay itu sendiri, lalu memotret hasil potretnya, dan seterusnya.
+
+Aplikasi mendeteksi tumpang tindih antara area tangkap dan jendela overlay, lalu
+menyalakan **capture exclusion** (`WDA_EXCLUDEFROMCAPTURE`) secara otomatis
+selama opsi **Hide the overlay from its own capture** aktif. Butuh Windows 10
+versi 2004 ke atas; di bawah itu pindahkan overlay ke monitor lain atau tangkap
+sebuah region yang tidak bersinggungan dengan overlay.
 
 ---
 
@@ -153,8 +217,8 @@ Impor tidak pernah menimpa: kalau namanya bentrok, profil masuk sebagai `Nama (2
 
 ## Tab About
 
-Versi aplikasi, Python, Qt, status SpoutGL, lokasi folder data dan log, serta ringkasan
-langkah setup OBS.
+Versi aplikasi, Python, Qt, status SpoutGL **dan NDI**, lokasi folder data dan log, serta
+ringkasan langkah setup OBS.
 
 ---
 
@@ -165,8 +229,8 @@ Dinyalakan di tab Behaviour (**Show the statistics panel on the overlay**).
 | Baris | Arti |
 |---|---|
 | **Status** | Connected / Connecting / Error |
-| **Sender** | Nama sender yang terhubung |
-| **Size** | Resolusi sender |
+| **Sender** | Apa yang sedang terhubung — nama Spout sender, nama sumber NDI, monitor yang ditangkap, atau nama berkas gambar |
+| **Size** | Resolusi sumber |
 | **FPS** | Aktual / target. Hijau ≥90% target, kuning ≥60%, merah di bawah itu. |
 | **Frames** | Diterima (dibuang, persentase) |
 | **Age** | Usia frame terakhir — kalau terus naik, feed berhenti |
@@ -177,13 +241,21 @@ Dinyalakan di tab Behaviour (**Show the statistics panel on the overlay**).
 ## Soal alpha premultiplied
 
 OBS menyusun scene dengan alpha premultiplied, artinya kanal warna sudah dikalikan alpha
-sebelum dikirim. Aplikasi ini menyetelnya aktif secara bawaan.
+sebelum dikirim. NDI sebaliknya: spesifikasinya menyatakan datanya *tidak* premultiplied.
+Karena itu bawaannya berbeda per sumber:
+
+| Sumber | Bawaan | Alasan |
+|---|---|---|
+| Spout | **aktif** | Filter Spout OBS mengirim premultiplied |
+| NDI | **nonaktif** | Spesifikasi NDI: "not pre-multiplied" |
+| Screen capture | — | Tangkapan layar selalu opaque, tidak ada alpha |
+| Image file | nonaktif | PNG/GIF/WebP memakai straight alpha |
 
 Kalau salah setel, gejalanya terlihat jelas di tepi yang antialias (teks, lingkaran):
 
-| | Sumber OBS | Sumber straight alpha |
+| | Sumber premultiplied (OBS) | Sumber straight alpha (NDI, PNG) |
 |---|---|---|
-| Aktif (bawaan) | Benar | Tepi pucat / terlalu terang |
+| Aktif | Benar | Tepi pucat / terlalu terang |
 | Nonaktif | **Tepi bergaris gelap** | Benar |
 
 ---

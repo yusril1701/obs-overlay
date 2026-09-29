@@ -17,7 +17,7 @@ import logging
 from PyQt6.QtCore import QObject, QTimer
 from PyQt6.QtWidgets import QApplication, QSystemTrayIcon
 
-from .config.models import AppSettings, Profile
+from .config.models import AppSettings, Profile, SourceKind
 from .config.store import ConfigStore, ProfileStoreError
 from .constants import APP_NAME, APP_VERSION, ORG_NAME
 from .core import geometry as geo
@@ -155,6 +155,7 @@ class OverlayApplication(QObject):
         self.tray.set_overlay_visible(self.overlay.isVisible())
         self.tray.set_click_through(self._profile.behavior.click_through)
         self._warn_if_unsafe()
+        self._guard_screen_capture()
 
     def quit(self) -> None:
         if self._shutting_down:
@@ -210,10 +211,12 @@ class OverlayApplication(QObject):
 
         if section == SECTION_SOURCE:
             self.producer.apply_settings(self._profile.source)
+            self._guard_screen_capture()
         elif section == SECTION_DISPLAY:
             self.overlay.apply_geometry()
             self.overlay.invalidate_mask()
             self.overlay.update()
+            self._guard_screen_capture()
         elif section == SECTION_BEHAVIOR:
             self.overlay.refresh_mask()
             self.overlay.apply_behavior()
@@ -379,6 +382,71 @@ class OverlayApplication(QObject):
             logger.warning("No handler for hotkey action %r", action)
             return
         handler()
+
+    # ------------------------------------------------------------------
+    # Screen-capture feedback
+    # ------------------------------------------------------------------
+    def captured_area(self) -> geo.RectSpec | None:
+        """The area the screen source captures, in virtual-desktop coordinates.
+
+        ``None`` when the active source is not capturing the desktop.
+        """
+        if self._profile.source.kind is not SourceKind.SCREEN:
+            return None
+
+        from .sources.screen_source import ScreenSource
+
+        screen = self._profile.source.screen
+        probe = ScreenSource(
+            monitor_index=screen.monitor_index,
+            region=screen.region if screen.use_region else None,
+        )
+        rect = probe.captured_rect()
+        return rect if rect.width > 0 and rect.height > 0 else None
+
+    def _guard_screen_capture(self) -> None:
+        """Stop the overlay photographing itself.
+
+        Capturing the display the overlay sits on feeds the overlay back into
+        its own input, which recurses into an infinite tunnel within a few
+        frames. Windows can exclude a window from capture outright, so when the
+        two areas overlap that is switched on rather than leaving the user to
+        discover the problem visually.
+        """
+        area = self.captured_area()
+        if area is None or not self._profile.source.screen.avoid_self_capture:
+            return
+
+        overlay_rect = self.overlay.geometry()
+        overlay = geo.RectSpec(
+            overlay_rect.x(), overlay_rect.y(), overlay_rect.width(), overlay_rect.height()
+        )
+        if not geo.intersects(area, overlay):
+            return
+
+        if self._profile.behavior.exclude_from_capture:
+            return
+
+        logger.info("Screen capture overlaps the overlay; enabling capture exclusion.")
+        self._profile.behavior.exclude_from_capture = True
+        applied = self.overlay.apply_behavior()
+        self.panel.load_profile(self._profile)
+
+        if applied:
+            self.tray.notify(
+                "OBS Overlay",
+                "The overlay is inside the captured area, so it was hidden from "
+                "screen capture to stop it feeding back into itself.",
+            )
+        else:
+            self.tray.notify(
+                "OBS Overlay",
+                "The overlay is inside the captured area and will photograph "
+                "itself. Capture exclusion is unavailable on this system — "
+                "capture a different monitor or a region that excludes the "
+                "overlay.",
+                warning=True,
+            )
 
     # ------------------------------------------------------------------
     # Safety

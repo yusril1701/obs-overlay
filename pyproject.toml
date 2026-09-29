@@ -4,13 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "obs-overlay"
-version = "1.0.0"
-description = "Transparent, click-through OBS Spout2 overlay for Windows with interactive window masking (parcels)."
+version = "1.1.0"
+description = "Transparent, click-through overlay for Windows with interactive window masking (parcels), fed from OBS/Spout2, NDI, screen capture or an image."
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
 authors = [{ name = "obs-overlay contributors" }]
-keywords = ["obs", "spout", "overlay", "transparent", "click-through", "pyqt6", "windows"]
+keywords = ["obs", "spout", "ndi", "screen-capture", "overlay", "transparent", "click-through", "pyqt6", "windows"]
 classifiers = [
     "Development Status :: 5 - Production/Stable",
     "Environment :: Win32 (MS Windows)",
@@ -48,6 +48,17 @@ dev = [
 ]
 build = [
     "pyinstaller>=6.6",
+]
+# The NDI source is optional: the binding is useless without the NDI Runtime,
+# which cannot be redistributed and has to be installed separately from
+# https://ndi.video/download-ndi-sdk/ .
+#
+# Deliberately left without a python_version marker. Current ndi-python wheels
+# start at CPython 3.10, so on 3.9 this extra fails loudly with "no matching
+# distribution" — which is the truth. A marker would make it install nothing
+# and leave the NDI source mysteriously missing.
+ndi = [
+    "ndi-python>=5.1",
 ]
 
 [project.urls]

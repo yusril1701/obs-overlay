@@ -49,6 +49,12 @@ hiddenimports = [
     # time it converts a datetime — a runtime failure, not a build failure.
     "win32timezone",
 ]
+# NDIlib (the ndi-python binding) is deliberately NOT listed here. It is
+# optional, and `obs_overlay.sources.ndi_source` imports it inside a function,
+# so a build machine without it still produces a working bundle — the NDI
+# source simply reports what to install. When the binding *is* installed at
+# build time PyInstaller picks it up on its own; the NDI Runtime DLL stays the
+# user's to install either way, because its licence forbids redistribution.
 hiddenimports += collect_submodules("obs_overlay")
 
 # Everything that would only bloat the bundle. PyQt5/PySide are listed because

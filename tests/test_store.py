@@ -100,13 +100,13 @@ class TestConfigStore:
 
     def test_save_and_load_round_trip(self, store):
         profile = Profile.default("Stream")
-        profile.source.sender_name = "MySender"
+        profile.source.spout.sender_name = "MySender"
         profile.parcels[0].x = 1234
         store.save_profile(profile)
 
         loaded = store.load_profile("Stream")
         assert loaded.name == "Stream"
-        assert loaded.source.sender_name == "MySender"
+        assert loaded.source.spout.sender_name == "MySender"
         assert loaded.parcels[0].x == 1234
 
     def test_missing_profile_yields_default_with_that_name(self, store):
@@ -241,7 +241,7 @@ class TestMigrations:
         migrated = migrate(
             {"schema_version": 1, "sender": "OBS_Sender", "fps": 30, "click_through": False}
         )
-        assert migrated["source"]["sender_name"] == "OBS_Sender"
+        assert migrated["source"]["spout"]["sender_name"] == "OBS_Sender"
         assert migrated["source"]["target_fps"] == 30
         assert migrated["behavior"]["click_through"] is False
 
@@ -252,7 +252,7 @@ class TestMigrations:
     def test_migrated_dict_loads_into_a_profile(self):
         migrated = migrate({"schema_version": 1, "boxes": [[10, 20, 300, 400]], "sender": "S"})
         profile = Profile.from_dict(migrated)
-        assert profile.source.sender_name == "S"
+        assert profile.source.spout.sender_name == "S"
         assert profile.parcels[0].width == 300
 
     def test_newer_schema_passes_through(self):

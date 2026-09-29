@@ -52,6 +52,8 @@ from ..config.models import (
     Profile,
     RectSpec,
     ScaleQuality,
+    SourceKind,
+    SourceSettings,
 )
 from ..core import geometry as geo
 from ..core.fps import StatsSnapshot
@@ -150,6 +152,8 @@ class OverlayWindow(QWidget):
         self._topmost_timer.timeout.connect(self._reassert_topmost)
 
         self._native_applied = False
+        #: True while a repaint has been requested but not yet delivered.
+        self._repaint_pending = False
 
     # ------------------------------------------------------------------
     # Profile
@@ -166,14 +170,14 @@ class OverlayWindow(QWidget):
             self.apply_geometry()
         self.invalidate_mask()
         self.apply_behavior()
-        self.update()
+        self.request_repaint()
 
     def _set_parcels(self, parcels: list[Parcel]) -> None:
         self._profile.parcels = parcels
 
     def _on_parcels_changed(self) -> None:
         self.invalidate_mask()
-        self.update()
+        self.request_repaint()
         self.layoutChanged.emit()
 
     # ------------------------------------------------------------------
@@ -291,13 +295,19 @@ class OverlayWindow(QWidget):
     # ------------------------------------------------------------------
     # Native behaviour
     # ------------------------------------------------------------------
-    def apply_behavior(self) -> None:
-        """Push the profile's behaviour flags down to the native window."""
+    def apply_behavior(self) -> bool:
+        """Push the profile's behaviour flags down to the native window.
+
+        Returns whether capture exclusion is actually in force, which the
+        screen-capture feedback guard needs to know: the request can be refused
+        on Windows builds older than 10 version 2004, and reporting success
+        there would leave the user chasing an infinite mirror.
+        """
         behavior = self._profile.behavior
         if not self._controller.supported:
-            return
+            return False
         if not self._native_applied and not self._attach_controller():
-            return
+            return False
 
         # Click-through is suppressed while editing, whatever the profile says
         # — otherwise the editor could not receive a single click.
@@ -305,13 +315,15 @@ class OverlayWindow(QWidget):
         self._controller.set_tool_window(behavior.hide_from_taskbar)
         self._controller.set_no_activate(behavior.no_activate and not self._edit_mode)
         self._controller.set_topmost(behavior.always_on_top)
-        self._controller.set_excluded_from_capture(behavior.exclude_from_capture)
+        capture_excluded = self._controller.set_excluded_from_capture(behavior.exclude_from_capture)
 
         interval = behavior.topmost_reassert_ms
         if behavior.always_on_top and interval > 0:
             self._topmost_timer.start(max(250, interval))
         else:
             self._topmost_timer.stop()
+
+        return capture_excluded and behavior.exclude_from_capture
 
     def _attach_controller(self) -> bool:
         handle = int(self.winId())
@@ -366,6 +378,23 @@ class OverlayWindow(QWidget):
 
         if previous is not None:
             previous.release()
+        self.request_repaint()
+
+    def request_repaint(self) -> None:
+        """Ask for a repaint, with at most one outstanding at a time.
+
+        Frames arrive faster than a full-screen composite can be painted, and
+        an unbounded stream of update requests keeps the event loop permanently
+        busy: timers then never get their turn, so the stats readout freezes,
+        topmost is never re-asserted and — worst of all — the debounced profile
+        save never fires, silently losing layout edits.
+
+        Bounding the pipeline to one paint in flight costs nothing (only the
+        newest frame is ever drawn anyway) and keeps the loop responsive.
+        """
+        if self._repaint_pending:
+            return
+        self._repaint_pending = True
         self.update()
 
     def clear_frame(self) -> None:
@@ -377,12 +406,12 @@ class OverlayWindow(QWidget):
             # Stop showing a stale picture from a sender that has gone away.
             self.clear_frame()
         else:
-            self.update()
+            self.request_repaint()
 
     def set_stats(self, stats: StatsSnapshot) -> None:
         self._stats = stats
         if self._profile.hud.enabled:
-            self.update()
+            self.request_repaint()
 
     def video_rect(self) -> RectSpec:
         """Where the current frame is drawn inside the window."""
@@ -424,7 +453,7 @@ class OverlayWindow(QWidget):
             self.unsetCursor()
             self.editor.clear_selection()
 
-        self.update()
+        self.request_repaint()
         self.editModeChanged.emit(enabled)
         logger.info("Edit mode %s", "entered" if enabled else "left")
 
@@ -435,6 +464,9 @@ class OverlayWindow(QWidget):
     # Painting
     # ------------------------------------------------------------------
     def paintEvent(self, event) -> None:
+        # Cleared first: a new frame arriving during this paint must be able to
+        # schedule the next one, or the overlay would stop updating entirely.
+        self._repaint_pending = False
         painter = QPainter(self)
         try:
             painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
@@ -524,20 +556,49 @@ class OverlayWindow(QWidget):
             return
         painter.setClipPath(path)
 
+    #: What to say while each source kind has nothing to show. The advice has
+    #: to match the chosen source — telling an image user to start OBS would be
+    #: worse than saying nothing.
+    _WAITING_TEXT = {
+        SourceKind.SPOUT: (
+            "Waiting for a Spout sender…",
+            "Start OBS and add the 'Spout Filter' to your scene.",
+        ),
+        SourceKind.NDI: (
+            "Waiting for an NDI source…",
+            "Check that the sender is on the same network and that discovery "
+            "is not blocked by a firewall.",
+        ),
+        SourceKind.SCREEN: (
+            "Starting screen capture…",
+            "If this persists, the selected monitor may have been disconnected.",
+        ),
+        SourceKind.IMAGE: (
+            "No image loaded",
+            "Choose an image file in the control panel's Source tab.",
+        ),
+        SourceKind.DEMO: ("Starting the test pattern…", ""),
+    }
+
     def _paint_placeholder(self, painter: QPainter, viewport: QRect) -> None:
-        """ "Waiting for OBS" panel, shown when there is no picture."""
+        """The "nothing to show yet" panel, worded for the active source."""
         info = self._source_info
+        source = self._profile.source
+        waiting_headline, waiting_advice = self._WAITING_TEXT.get(
+            source.kind, ("Waiting for a source…", "")
+        )
+
         if info.state is SourceState.ERROR:
             headline = "Source error"
             tint = color(PALETTE.danger)
         else:
-            headline = "Waiting for a Spout sender…"
+            headline = waiting_headline
             tint = color(PALETTE.warning)
 
-        lines = [
-            info.detail or "Start OBS and add the Spout2 output filter to your scene.",
-            f"Expecting sender: {self._profile.source.sender_name or '(any)'}",
-        ]
+        lines = [info.detail or waiting_advice]
+        expecting = self._expected_source_label(source)
+        if expecting:
+            lines.append(expecting)
 
         painter.save()
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
@@ -577,6 +638,19 @@ class OverlayWindow(QWidget):
     # ------------------------------------------------------------------
     # Events
     # ------------------------------------------------------------------
+    @staticmethod
+    def _expected_source_label(source: SourceSettings) -> str:
+        """One line naming what the overlay is waiting for, if that helps."""
+        if source.kind is SourceKind.SPOUT:
+            return f"Expecting sender: {source.spout.sender_name or '(any)'}"
+        if source.kind is SourceKind.NDI:
+            return f"Expecting NDI source: {source.ndi.source_name or '(any)'}"
+        if source.kind is SourceKind.SCREEN:
+            return f"Capturing monitor {source.screen.monitor_index}"
+        if source.kind is SourceKind.IMAGE:
+            return source.image.path or ""
+        return ""
+
     def showEvent(self, event) -> None:
         super().showEvent(event)
         # Qt can destroy and recreate the native window (flag changes, screen
@@ -595,7 +669,7 @@ class OverlayWindow(QWidget):
             event.ignore()
             return
         if self.editor.mouse_press(event):
-            self.update()
+            self.request_repaint()
             event.accept()
             return
         super().mousePressEvent(event)
@@ -605,7 +679,7 @@ class OverlayWindow(QWidget):
             event.ignore()
             return
         if self.editor.mouse_move(event):
-            self.update()
+            self.request_repaint()
         self.setCursor(QCursor(self.editor.cursor_for(event.position().toPoint())))
         event.accept()
 
@@ -614,14 +688,14 @@ class OverlayWindow(QWidget):
             event.ignore()
             return
         if self.editor.mouse_release(event):
-            self.update()
+            self.request_repaint()
             event.accept()
             return
         super().mouseReleaseEvent(event)
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
         if self._edit_mode and self.editor.key_press(event):
-            self.update()
+            self.request_repaint()
             event.accept()
             return
         super().keyPressEvent(event)

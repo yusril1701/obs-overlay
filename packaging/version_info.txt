@@ -5,8 +5,8 @@
 # four-part tuples in step with obs_overlay.constants.APP_VERSION.
 VSVersionInfo(
   ffi=FixedFileInfo(
-    filevers=(1, 0, 0, 0),
-    prodvers=(1, 0, 0, 0),
+    filevers=(1, 1, 0, 0),
+    prodvers=(1, 1, 0, 0),
     mask=0x3f,
     flags=0x0,
     OS=0x40004,
@@ -21,13 +21,13 @@ VSVersionInfo(
           '040904B0',
           [
             StringStruct('CompanyName', 'obs-overlay contributors'),
-            StringStruct('FileDescription', 'Transparent click-through OBS Spout2 overlay'),
-            StringStruct('FileVersion', '1.0.0.0'),
+            StringStruct('FileDescription', 'Transparent click-through overlay for OBS, NDI and screen capture'),
+            StringStruct('FileVersion', '1.1.0.0'),
             StringStruct('InternalName', 'ObsOverlay'),
             StringStruct('LegalCopyright', 'MIT License'),
             StringStruct('OriginalFilename', 'ObsOverlay.exe'),
             StringStruct('ProductName', 'OBS Overlay'),
-            StringStruct('ProductVersion', '1.0.0.0'),
+            StringStruct('ProductVersion', '1.1.0.0'),
           ]
         )
       ]
