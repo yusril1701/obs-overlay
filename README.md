@@ -410,10 +410,23 @@ alpha premultiplied, bagaimana buffer pool bekerja) dijelaskan di
 
 Dokumen lain:
 
+**Untuk pengguna**
+
 - [docs/OBS_SETUP.md](docs/OBS_SETUP.md) — panduan OBS langkah demi langkah
 - [docs/USER_GUIDE.md](docs/USER_GUIDE.md) — penjelasan tiap setelan
+- [docs/HOTKEYS.md](docs/HOTKEYS.md) — daftar dan perilaku hotkey
 - [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) — diagnosis masalah
-- [docs/BUILD.md](docs/BUILD.md) — packaging
+
+**Untuk pengembang**
+
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — bagaimana dan **kenapa** kodenya begitu
+- [docs/BUILD.md](docs/BUILD.md) — packaging dan installer
+- [docs/WINDOWS_CHECKLIST.md](docs/WINDOWS_CHECKLIST.md) — verifikasi manual yang hanya
+  bisa dilakukan di Windows; ini berisi semua yang belum pernah diuji di perangkat nyata
+- [docs/ROADMAP.md](docs/ROADMAP.md) — yang bisa dikerjakan berikutnya, dan yang
+  sebaiknya tidak
+- [CLAUDE.md](CLAUDE.md) — instruksi untuk agent AI: invarian yang tidak boleh
+  "diperbaiki", resep menambah sumber/setelan, dan status verifikasi
 - [CONTRIBUTING.md](CONTRIBUTING.md) — cara berkontribusi
 - [CHANGELOG.md](CHANGELOG.md) — riwayat perubahan
 

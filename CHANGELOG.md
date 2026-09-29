@@ -31,6 +31,10 @@ hanya dari mana frame datang.
   terhapus kecuali Anda menjawab ya saat ditanya.
 - 73 tes baru (381 total), termasuk migrasi profil, kebijakan sambung-ulang,
   penanganan alpha per sumber, dan titik masuk aplikasi.
+- Dokumentasi serah-terima: `CLAUDE.md` (invarian yang tidak boleh "diperbaiki", resep
+  menambah sumber/setelan, status verifikasi), `docs/WINDOWS_CHECKLIST.md` (verifikasi
+  manual yang hanya bisa dilakukan di Windows), dan `docs/ROADMAP.md` (yang bisa
+  dikerjakan berikutnya, dan yang sebaiknya tidak).
 
 ### Diubah
 

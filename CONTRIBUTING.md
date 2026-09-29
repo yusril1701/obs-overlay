@@ -81,6 +81,25 @@ perilaku hanya bisa diverifikasi di perangkat keras nyata, catat itu di docstrin
 
 Berkas profil yang ditulis versi lama harus **selalu** tetap bisa dimuat.
 
+## Memverifikasi di Windows
+
+Sebagian besar kode ini ditulis dan diuji di Linux tanpa GPU. Yang butuh Windows
+sungguhan — Spout, NDI, click-through, hotkey global, capture exclusion, installer —
+tidak tersentuh CI sama sekali.
+
+Daftar lengkap apa yang harus dicoba manual, beserta hasil yang benar dan arti setiap
+kegagalan, ada di **[docs/WINDOWS_CHECKLIST.md](docs/WINDOWS_CHECKLIST.md)**. Kalau Anda
+punya mesin Windows, mengerjakan daftar itu lebih berharga daripada menambah fitur.
+
+## Bekerja dengan agent AI
+
+**[CLAUDE.md](CLAUDE.md)** berisi yang perlu diketahui agent: invarian yang tidak boleh
+"diperbaiki" (semuanya pernah jadi bug), resep menambah sumber video atau setelan baru,
+perintah quality gate, dan bagian mana yang sudah terverifikasi dan mana yang belum.
+
+Ide pekerjaan berikutnya ada di **[docs/ROADMAP.md](docs/ROADMAP.md)** — termasuk daftar
+hal yang sebaiknya **tidak** dikerjakan, beserta alasannya.
+
 ## Melaporkan bug
 
 Sertakan versi Windows, versi OBS, versi plugin Spout2, keluaran `--list-senders`, dan
