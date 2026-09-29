@@ -24,8 +24,13 @@ hanya dari mana frame datang.
 - CLI: `--source KIND`, `--image PATH`, `--capture-monitor INDEX`, dan
   `--list-senders --source ndi|screen`.
 - Tab **About** menampilkan status NDI di samping status SpoutGL.
-- 70 tes baru (378 total), termasuk migrasi profil, kebijakan sambung-ulang, dan
-  penanganan alpha per sumber.
+- **Installer Windows** (`packaging/installer.iss`, Inno Setup 6): pasang seperti
+  aplikasi biasa — wizard, pintasan Start Menu, entri di Apps & features, uninstaller.
+  Bawaannya per-pengguna, jadi tidak butuh administrator. Opsional: pintasan desktop dan
+  jalan otomatis saat masuk Windows. Profil di `%APPDATA%\obs-overlay` tidak ikut
+  terhapus kecuali Anda menjawab ya saat ditanya.
+- 73 tes baru (381 total), termasuk migrasi profil, kebijakan sambung-ulang,
+  penanganan alpha per sumber, dan titik masuk aplikasi.
 
 ### Diubah
 
@@ -40,6 +45,12 @@ hanya dari mana frame datang.
 
 ### Diperbaiki
 
+- **`.exe` hasil build tidak bisa dijalankan sama sekali.** `__main__.py` memakai impor
+  relatif, sedangkan PyInstaller menjalankan berkas itu sebagai skrip biasa tanpa paket
+  induk — jadi bundel mati dengan `attempted relative import with no known parent
+  package` sebelum menggambar apa pun. Impornya diubah jadi absolut, dan
+  `tests/test_entry_point.py` sekarang menjalankan berkas itu persis seperti PyInstaller
+  supaya kesalahan yang sama tidak bisa lolos lagi. Bug ini ada sejak rilis 1.0.0.
 - `FrameProducer` menyimpan **salinan** setelan sumber, bukan referensi ke objek profil.
   Sebelumnya perbandingan "perlu buka ulang?" membandingkan sebuah objek dengan dirinya
   sendiri, sehingga mengganti nama sender tidak pernah memicu sambung ulang.

@@ -124,10 +124,21 @@ jobs:
         run: |
           $exe = "packaging/dist/ObsOverlay/ObsOverlay.exe"
           if (-not (Test-Path $exe)) { throw "Executable not produced" }
-          # Exercises the frozen import graph; a missing hidden import or
-          # native DLL fails here rather than on a user's machine.
-          & $exe --version
-          if ($LASTEXITCODE -ne 0) { throw "Executable failed to start ($LASTEXITCODE)" }
+
+          # Exercises the frozen import graph. A missing hidden import, a
+          # native DLL left behind, or an entry point that only works when
+          # run as a module fails here rather than on a user's machine.
+          $out = & $exe --version 2>&1 | Out-String
+          if ($LASTEXITCODE -ne 0) { throw "ObsOverlay.exe --version failed ($LASTEXITCODE):`n$out" }
+          if ($out -notmatch 'OBS Overlay') { throw "Unexpected --version output:`n$out" }
+          Write-Host "--version: $($out.Trim())"
+
+          # --version alone never touches Qt. This does: it builds a
+          # QGuiApplication and enumerates the screens, so a Qt platform
+          # plugin missing from the bundle shows up here too.
+          $screens = & $exe --list-senders --source screen 2>&1 | Out-String
+          if ($LASTEXITCODE -ne 0) { throw "Frozen Qt startup failed ($LASTEXITCODE):`n$screens" }
+          Write-Host "monitors:`n$screens"
 
       - name: Read the application version
         id: version

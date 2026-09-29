@@ -398,7 +398,7 @@ Log lengkap ada di `%APPDATA%\obs-overlay\logs\obs-overlay.log`
 ```powershell
 pip install -e ".[dev]"
 
-pytest                    # 378 tes, jalan tanpa GPU/OBS
+pytest                    # 381 tes, jalan tanpa GPU/OBS
 ruff check src tests
 ruff format src tests
 mypy

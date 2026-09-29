@@ -348,7 +348,7 @@ mengganti nama sender tidak akan pernah memicu sambung ulang.
 
 ## Kenapa semuanya bisa diuji
 
-378 tes berjalan di Linux tanpa GPU, tanpa OBS, tanpa Windows:
+381 tes berjalan di Linux tanpa GPU, tanpa OBS, tanpa Windows:
 
 - **Matematika editor** murni fungsi atas `RectSpec` → diuji langsung.
 - **Parser hotkey** dipisah dari `ctypes` ke `hotkey_spec.py` → diuji di mana saja.

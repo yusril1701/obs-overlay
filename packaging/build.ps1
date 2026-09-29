@@ -113,10 +113,23 @@ try {
     # window: if a hidden import or a native DLL is missing, this is where it
     # shows up rather than on a user's machine.
     Write-Step 'Smoke-testing the bundle'
-    & $ExePath --list-profiles | Out-Null
-    if ($LASTEXITCODE -gt 1) {
-        throw "The built executable failed to start (exit code $LASTEXITCODE)."
+
+    $VersionOut = (& $ExePath --version 2>&1 | Out-String).Trim()
+    if ($LASTEXITCODE -ne 0) {
+        throw "The built executable failed to start (exit code $LASTEXITCODE):`n$VersionOut"
     }
+    if ($VersionOut -notmatch 'OBS Overlay') {
+        throw "Unexpected --version output: $VersionOut"
+    }
+    Write-Host "    $VersionOut"
+
+    # --version never touches Qt. This does: it builds a QGuiApplication and
+    # enumerates the screens, so a missing Qt platform plugin is caught too.
+    $ScreensOut = (& $ExePath --list-senders --source screen 2>&1 | Out-String).Trim()
+    if ($LASTEXITCODE -ne 0) {
+        throw "Qt failed to start inside the bundle (exit code $LASTEXITCODE):`n$ScreensOut"
+    }
+    Write-Host "    monitors: $($ScreensOut -replace "`r?`n", '; ')"
 
     $size = (Get-ChildItem -Recurse (Join-Path $DistDir 'ObsOverlay') |
         Measure-Object -Property Length -Sum).Sum / 1MB
